@@ -5,6 +5,7 @@
 ## Build generated
 build/
 DerivedData/
+dist/
 
 ## Various settings
 *.pbxuser
@@ -69,4 +70,4 @@ fastlane/test_output
 
 # MacOS
 .DS_Store
-
+.codegraph/

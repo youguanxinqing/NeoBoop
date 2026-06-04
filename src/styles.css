@@ -1,0 +1,400 @@
+:root {
+  /* One Dark palette — kept in sync with CodeMirror's oneDark theme so the
+     editor and the surrounding chrome read as a single surface. */
+  --bg: #282c34;
+  --fg: #abb2bf;
+  --accent: #528bff;
+  --info: #61afef;
+  --error: #e06c75;
+  --picker-bg: #21252b;
+  --border: #181a1f;
+  --tabbar-bg: #21252b;
+  --tabbar-border: #15171c;
+  --tab-divider: #3a3f4b;
+  --tab-fg: #868d9a;
+  --tab-active-fg: #d7dae0;
+  --tab-active-bg: #282c34;
+  --tab-hover-bg: #2c313a;
+  --tab-close-hover-bg: rgba(255, 255, 255, 0.14);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* One Light palette — paired with CodeMirror's default light theme. */
+    --bg: #fafafa;
+    --fg: #383a42;
+    --accent: #4078f2;
+    --info: #4078f2;
+    --error: #e45649;
+    --picker-bg: #ffffff;
+    --border: #d4d4d4;
+    --tabbar-bg: #dcdce0;
+    --tabbar-border: #b8b8bd;
+    --tab-divider: #c2c2c7;
+    --tab-fg: #5c5c63;
+    --tab-active-fg: #1d1d20;
+    --tab-active-bg: #fafafa;
+    --tab-hover-bg: #d0d0d5;
+    --tab-close-hover-bg: rgba(0, 0, 0, 0.13);
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+.status-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+  padding: 0 4px 0 12px;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+.status-msg {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lang-select {
+  flex: 0 0 auto;
+  appearance: none;
+  border: none;
+  background-color: transparent;
+  color: var(--tab-fg);
+  font-size: 11px;
+  padding: 2px 18px 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 8px center, right 4px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.lang-select:hover {
+  background-color: var(--tab-hover-bg);
+  color: var(--fg);
+}
+.status-bar.idle {
+  color: #5c6370;
+}
+.status-bar.info {
+  color: var(--info);
+}
+.status-bar.error {
+  color: var(--error);
+  background: rgba(224, 108, 117, 0.12);
+}
+
+.editor {
+  flex: 1 1 auto;
+  overflow: hidden;
+  display: flex;
+  min-height: 0;
+}
+.editor-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor .cm-editor {
+  height: 100%;
+}
+.editor .cm-scroller {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 13px;
+}
+
+/* ---- tab bar (macOS window-tab style) ---- */
+.tab-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  background: var(--tabbar-bg);
+  border-bottom: 1px solid var(--tabbar-border);
+  overflow: hidden;
+}
+.tab-bar.hidden {
+  display: none;
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 200px;
+  min-width: 52px;
+  padding: 0 24px;
+  font-size: 12.5px;
+  color: var(--tab-fg);
+  background: transparent;
+  cursor: default;
+  user-select: none;
+}
+.tab.active {
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+}
+.tab:not(.active):hover {
+  background: var(--tab-hover-bg);
+}
+
+/* Short inset hairline between adjacent tabs, hidden next to the active/hovered
+   tab and at the run's end — the way native window tabs separate. */
+.tab::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--tab-divider);
+}
+.tab:last-of-type::after,
+.tab.active::after,
+.tab:hover::after,
+.tab:has(+ .tab.active)::after,
+.tab:has(+ .tab:hover)::after {
+  opacity: 0;
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tab-active-fg);
+  opacity: 0;
+  cursor: default;
+  transition: opacity 0.08s ease, background 0.08s ease;
+}
+.tab-close::before {
+  content: "✕";
+  font-size: 9px;
+  line-height: 1;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 0.5;
+}
+.tab-close:hover {
+  opacity: 1;
+  background: var(--tab-close-hover-bg);
+}
+
+.tab-add {
+  flex: 0 0 auto;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--tab-fg);
+  opacity: 0.75;
+  cursor: default;
+}
+.tab-add::before {
+  content: "+";
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1;
+}
+.tab-add:hover {
+  opacity: 1;
+  background: var(--tab-hover-bg);
+}
+
+.picker-wrap {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  overflow: hidden;
+}
+.picker-wrap.hidden {
+  display: none;
+}
+
+.picker-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.picker-item {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.picker-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+.picker-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.picker-badge {
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  vertical-align: middle;
+}
+.picker-badge.action {
+  background: #8a8f99;
+}
+.picker-item.active .picker-badge {
+  background: rgba(255, 255, 255, 0.25);
+}
+.picker-desc {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* ---- preferences window ---- */
+.prefs {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+.prefs-body {
+  padding: 22px 26px;
+}
+.prefs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.prefs-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.prefs-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.prefs-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.prefs-button {
+  flex: 0 0 auto;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--tab-hover-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.prefs-button:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.prefs-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.prefs-link {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+.prefs-link:disabled {
+  color: var(--tab-fg);
+  opacity: 0.5;
+  cursor: default;
+}
+.prefs-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--tab-fg);
+}
+.prefs-hint code {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+}

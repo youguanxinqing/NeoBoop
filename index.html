@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NeoBoop</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="tab-bar" class="tab-bar hidden"></div>
+      <div id="picker-wrap" class="picker-wrap hidden">
+        <input id="picker-input" class="picker-input" type="text"
+               placeholder="Search boops…" autocomplete="off" spellcheck="false" />
+        <ul id="picker-list" class="picker-list"></ul>
+      </div>
+      <div id="editor" class="editor"></div>
+      <div id="status-bar" class="status-bar idle">
+        <span id="status-msg" class="status-msg"></span>
+        <select id="lang-select" class="lang-select" title="Syntax highlighting"></select>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

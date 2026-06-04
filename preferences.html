@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Preferences</title>
+  </head>
+  <body class="prefs">
+    <main class="prefs-body">
+      <section class="prefs-section">
+        <label class="prefs-label" for="prefs-dir">Custom scripts folder location</label>
+        <div class="prefs-row">
+          <input id="prefs-dir" class="prefs-input" type="text" readonly
+                 placeholder="No folder selected" />
+          <button id="prefs-change" class="prefs-button">Change…</button>
+        </div>
+        <div class="prefs-actions">
+          <button id="prefs-clear" class="prefs-link">Clear</button>
+          <span class="prefs-hint">Drop <code>.js</code> boop scripts in this folder. Files without a
+            metadata header are treated as libraries you can <code>require()</code>.</span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/preferences.ts"></script>
+  </body>
+</html>

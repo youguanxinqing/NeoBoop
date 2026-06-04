@@ -228,6 +228,46 @@ pickerInput.addEventListener("keydown", (e) => {
   }
 });
 
+// ---- editor font zoom (⌘+ / ⌘- / ⌘0) --------------------------------------
+// App-wide zoom, the macOS way: one font size shared by every tab (and every
+// window, via localStorage), not a per-editor setting. Driven through the
+// --editor-font-size CSS variable that .cm-scroller reads.
+
+// Matches Boop's default editor font (SFMono-Regular 15pt). 1 CSS px maps 1:1
+// to a macOS point in the webview, so 15px reads the same size as native Boop.
+const DEFAULT_FONT_PX = 15;
+const MIN_FONT_PX = 8;
+const MAX_FONT_PX = 40;
+const FONT_KEY = "editor-font-px";
+
+const clampFont = (n: number) =>
+  Math.min(MAX_FONT_PX, Math.max(MIN_FONT_PX, Math.round(n)));
+
+let fontPx = clampFont(Number(localStorage.getItem(FONT_KEY)) || DEFAULT_FONT_PX);
+
+function applyFont(persist: boolean): void {
+  document.documentElement.style.setProperty("--editor-font-size", `${fontPx}px`);
+  if (persist) localStorage.setItem(FONT_KEY, String(fontPx));
+  // Line heights changed — make CodeMirror re-measure so scroll math stays sane.
+  tabs.requestMeasure();
+}
+
+function zoomFont(delta: number): void {
+  const next = delta === 0 ? DEFAULT_FONT_PX : clampFont(fontPx + delta);
+  if (next === fontPx && delta !== 0) return;
+  fontPx = next;
+  applyFont(true);
+  setStatus(`Font size ${fontPx}px`, "info");
+}
+
+// Apply the persisted size on boot, and keep other windows in sync live.
+applyFont(false);
+window.addEventListener("storage", (e) => {
+  if (e.key !== FONT_KEY || e.newValue == null) return;
+  fontPx = clampFont(Number(e.newValue) || DEFAULT_FONT_PX);
+  applyFont(false);
+});
+
 // ---- global shortcuts -----------------------------------------------------
 // Note: Settings (⌘,) is handled by the native menu accelerator, which emits
 // "open-settings" — no JS handler needed here.
@@ -253,6 +293,24 @@ window.addEventListener("keydown", (e) => {
   if (key === "w" && !e.shiftKey) {
     e.preventDefault();
     tabs.closeTab();
+    return;
+  }
+  // Cmd-+ / Cmd-= : larger font. Cmd-- : smaller. Cmd-0 : reset.
+  // "=" is the unshifted ⌘+ on most layouts; accept both. preventDefault also
+  // suppresses the WebView's own full-page zoom.
+  if (key === "=" || key === "+") {
+    e.preventDefault();
+    zoomFont(+1);
+    return;
+  }
+  if (key === "-" || key === "_") {
+    e.preventDefault();
+    zoomFont(-1);
+    return;
+  }
+  if (key === "0") {
+    e.preventDefault();
+    zoomFont(0);
     return;
   }
   // Cmd-Shift-] / [ : next / previous tab.

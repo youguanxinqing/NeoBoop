@@ -90,6 +90,11 @@ export class TabManager {
     for (const tab of this.tabs) tab.pane.setTheme(dark);
   }
 
+  /** Force every pane to re-measure geometry (e.g. after a font-size change). */
+  requestMeasure(): void {
+    for (const tab of this.tabs) tab.pane.view.requestMeasure();
+  }
+
   /** Title shown in the tab; falls back to a snippet of the content. */
   private titleFor(tab: Tab): string {
     const firstLine = tab.pane.fullText.split("\n", 1)[0].trim();

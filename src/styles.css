@@ -125,7 +125,8 @@ body,
 }
 .editor .cm-scroller {
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
-  font-size: 13px;
+  /* Driven by ⌘+ / ⌘- zoom (see main.ts); falls back to Boop's 15px default. */
+  font-size: var(--editor-font-size, 15px);
 }
 
 /* ---- tab bar (macOS window-tab style) ---- */

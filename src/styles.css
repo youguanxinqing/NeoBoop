@@ -16,6 +16,11 @@
   --tab-active-bg: #282c34;
   --tab-hover-bg: #2c313a;
   --tab-close-hover-bg: rgba(255, 255, 255, 0.14);
+  /* Split panes: a hairline divider and a faint scrim that dims inactive panes
+     (the Terminal.app cue), instead of a heavy border on the active one. */
+  --split-divider: rgba(255, 255, 255, 0.09);
+  --split-divider-hover: var(--accent);
+  --split-inactive-scrim: rgba(0, 0, 0, 0.28);
   color-scheme: dark;
 }
 
@@ -37,6 +42,9 @@
     --tab-active-bg: #fafafa;
     --tab-hover-bg: #d0d0d5;
     --tab-close-hover-bg: rgba(0, 0, 0, 0.13);
+    --split-divider: rgba(0, 0, 0, 0.13);
+    --split-divider-hover: var(--accent);
+    --split-inactive-scrim: rgba(0, 0, 0, 0.05);
     color-scheme: light;
   }
 }
@@ -127,6 +135,104 @@ body,
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
   /* Driven by ⌘+ / ⌘- zoom (see main.ts); falls back to Boop's 15px default. */
   font-size: var(--editor-font-size, 15px);
+}
+
+/* ---- split layout (see split.ts) ---- */
+
+/* Off-screen parking lot for panes whose tab isn't currently shown. Keeping the
+   EditorView in the DOM (just hidden) preserves its state — the iron rule. */
+.pane-holder {
+  display: none;
+}
+
+.split-branch {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.split-row {
+  flex-direction: row;
+}
+.split-column {
+  flex-direction: column;
+}
+
+.split-leaf {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Active-pane cue, macOS-native style (cf. Terminal.app): no border on the
+   focused pane — instead a faint scrim dims the *inactive* panes. Only applies
+   once actually split; the scrim ignores the pointer so a click still lands in
+   the editor beneath and focuses that pane. */
+.editor.split-active .split-leaf:not(.focused)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background: var(--split-inactive-scrim);
+  transition: background 0.12s ease;
+}
+
+/* Divider: a 1px hairline with a wider invisible grab zone (the ::before),
+   so it reads as a thin line but is comfortable to drag — the NSSplitView feel. */
+.split-divider {
+  position: relative;
+  flex: 0 0 1px;
+  background: var(--split-divider);
+  z-index: 4;
+  transition: background 0.12s ease;
+}
+.split-divider::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+}
+.split-divider:hover {
+  background: var(--split-divider-hover);
+}
+.split-divider-row {
+  cursor: col-resize;
+}
+.split-divider-row::before {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+.split-divider-column {
+  cursor: row-resize;
+}
+.split-divider-column::before {
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
+}
+
+/* While dragging a divider, keep the cursor steady and stop editors stealing
+   the pointer (which would start a text selection). */
+body.split-dragging {
+  user-select: none;
+}
+body.split-dragging .cm-content {
+  pointer-events: none;
+}
+body.split-dragging-row,
+body.split-dragging-row * {
+  cursor: col-resize !important;
+}
+body.split-dragging-column,
+body.split-dragging-column * {
+  cursor: row-resize !important;
 }
 
 /* ---- tab bar (macOS window-tab style) ---- */
@@ -273,6 +379,33 @@ body,
   font-size: 15px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
+}
+
+/* ---- rename tab (⌘S) — a compact single-field cousin of the picker ---- */
+.rename-wrap {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(360px, 80vw);
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  overflow: hidden;
+}
+.rename-wrap.hidden {
+  display: none;
+}
+.rename-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  padding: 12px 14px;
 }
 
 .picker-list {

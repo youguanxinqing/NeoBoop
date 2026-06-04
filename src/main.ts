@@ -16,6 +16,8 @@ const langSelect = document.getElementById("lang-select") as HTMLSelectElement;
 const pickerWrap = document.getElementById("picker-wrap")!;
 const pickerInput = document.getElementById("picker-input") as HTMLInputElement;
 const pickerList = document.getElementById("picker-list")!;
+const renameWrap = document.getElementById("rename-wrap")!;
+const renameInput = document.getElementById("rename-input") as HTMLInputElement;
 
 // ---- theme: follow the OS -------------------------------------------------
 
@@ -36,13 +38,13 @@ for (const { value, label } of LANG_OPTIONS) {
   langSelect.appendChild(opt);
 }
 function syncLangSelect(): void {
-  langSelect.value = tabs.active.mode;
+  langSelect.value = tabs.focused.mode;
 }
 langSelect.addEventListener("change", () => {
-  tabs.active.setMode(langSelect.value as LangName);
-  tabs.active.focus();
+  tabs.focused.setMode(langSelect.value as LangName);
+  tabs.focused.focus();
 });
-tabs.onActiveChange = syncLangSelect;
+tabs.onFocusChange = syncLangSelect;
 syncLangSelect();
 
 // ---- script registry (built-in + user) -----------------------------------
@@ -98,10 +100,15 @@ async function openPreferences(): Promise<void> {
 void listen("open-settings", () => void openPreferences());
 void listen("scripts-folder-changed", () => void loadUser(true));
 
+// ---- split view (native View menu, mirroring how Settings is wired) --------
+void listen("split-right", () => tabs.splitPane("row"));
+void listen("split-down", () => tabs.splitPane("column"));
+void listen("close-pane", () => tabs.closePane());
+
 // ---- run a script ---------------------------------------------------------
 
 function execute(script: BoopScript): void {
-  const pane = tabs.active;
+  const pane = tabs.focused;
   const result = runScript(
     script,
     libs,
@@ -120,57 +127,93 @@ function execute(script: BoopScript): void {
 
 // ---- command palette (scripts + actions) ----------------------------------
 
-// A command is either a boop script or an app action (e.g. set the custom
-// scripts folder). Surfacing actions in the ⌘B palette — the way Boop already
-// exposes everything — is how the folder setting becomes discoverable, instead
-// of hiding behind a bare keyboard shortcut.
-interface Command {
+// A palette entry is an app action, a boop script, or a tab in the switcher.
+// Surfacing actions in the ⌘B palette — the way Boop already exposes everything
+// — is how features like the scripts folder and pane switching stay
+// discoverable instead of hiding behind bare shortcuts.
+interface PickerEntry {
   name: string;
   description: string;
-  badge?: "custom" | "action";
+  badge?: "custom" | "action" | "current";
   keywords: string;
-  run: () => void;
+  choose: () => void;
 }
 
-/** Builds the command list: app actions first, then all scripts. */
-function buildCommands(): Command[] {
-  const actions: Command[] = [
-    {
-      name: "Settings…",
-      description: "Custom scripts folder and preferences",
-      badge: "action",
-      keywords: "settings preferences custom user config directory folder scripts",
-      run: () => void openPreferences(),
+// A picker session swaps the overlay between modes (command palette ↔ tab
+// switcher) while reusing the same DOM, fuzzy search, and keyboard handling.
+interface PickerSession {
+  placeholder: string;
+  build: () => PickerEntry[];
+}
+
+/** Command-palette session: app actions first, then all scripts. */
+function commandSession(): PickerSession {
+  return {
+    placeholder: "Search boops…",
+    build: () => {
+      const actions: PickerEntry[] = [
+        {
+          name: "Select Pane",
+          description: "Show another tab in the focused pane",
+          badge: "action",
+          keywords: "select pane tab switch go to choose buffer window",
+          choose: () => openPicker(tabSession()),
+        },
+        {
+          name: "Settings…",
+          description: "Custom scripts folder and preferences",
+          badge: "action",
+          keywords: "settings preferences custom user config directory folder scripts",
+          choose: () => void openPreferences(),
+        },
+      ];
+      const scriptCmds: PickerEntry[] = allScripts.map((s) => ({
+        name: s.meta.name,
+        description: s.meta.description ?? "",
+        badge: s.origin === "user" ? "custom" : undefined,
+        keywords: s.meta.tags ?? "",
+        choose: () => execute(s),
+      }));
+      return [...actions, ...scriptCmds];
     },
-  ];
-  const scriptCmds: Command[] = allScripts.map((s) => ({
-    name: s.meta.name,
-    description: s.meta.description ?? "",
-    badge: s.origin === "user" ? "custom" : undefined,
-    keywords: s.meta.tags ?? "",
-    run: () => execute(s),
-  }));
-  return [...actions, ...scriptCmds];
+  };
 }
 
-let matches: Command[] = [];
+/** Tab-switcher session (⌘B → "Select Pane"): pick a tab to show in the focused
+ *  pane. Searchable by title or content; Enter shows it in the current pane. */
+function tabSession(): PickerSession {
+  return {
+    placeholder: "Switch tab in this pane…",
+    build: () =>
+      tabs.list().map((t) => ({
+        name: t.title || "Untitled",
+        description: t.preview,
+        badge: t.focused ? "current" : undefined,
+        keywords: t.preview,
+        choose: () => tabs.showTab(t.id),
+      })),
+  };
+}
+
+let session: PickerSession = commandSession();
+let matches: PickerEntry[] = [];
 let activeIndex = 0;
 
 function renderPicker(): void {
-  const commands = buildCommands();
-  matches = search(commands, pickerInput.value.trim(), (c) => `${c.name} ${c.keywords}`);
+  const entries = session.build();
+  matches = search(entries, pickerInput.value.trim(), (e) => `${e.name} ${e.keywords}`);
   if (activeIndex >= matches.length) activeIndex = Math.max(0, matches.length - 1);
   pickerList.innerHTML = "";
-  matches.forEach((cmd, i) => {
+  matches.forEach((entry, i) => {
     const li = document.createElement("li");
     li.className =
       "picker-item" +
       (i === activeIndex ? " active" : "") +
-      (cmd.badge === "action" ? " is-action" : "");
-    const badge = cmd.badge ? `<span class="picker-badge ${cmd.badge}">${cmd.badge}</span>` : "";
+      (entry.badge === "action" ? " is-action" : "");
+    const badge = entry.badge ? `<span class="picker-badge ${entry.badge}">${entry.badge}</span>` : "";
     li.innerHTML =
-      `<span class="picker-name">${escapeHtml(cmd.name)}${badge}</span>` +
-      `<span class="picker-desc">${escapeHtml(cmd.description)}</span>`;
+      `<span class="picker-name">${escapeHtml(entry.name)}${badge}</span>` +
+      `<span class="picker-desc">${escapeHtml(entry.description)}</span>`;
     li.addEventListener("mousedown", (e) => {
       e.preventDefault();
       choosePicker(i);
@@ -181,8 +224,11 @@ function renderPicker(): void {
   pickerList.querySelector(".picker-item.active")?.scrollIntoView({ block: "nearest" });
 }
 
-function openPicker(): void {
+/** Open the overlay in a given session (command palette or tab switcher). */
+function openPicker(next: PickerSession): void {
+  session = next;
   pickerWrap.classList.remove("hidden");
+  pickerInput.placeholder = next.placeholder;
   pickerInput.value = "";
   activeIndex = 0;
   renderPicker();
@@ -191,13 +237,13 @@ function openPicker(): void {
 
 function closePicker(): void {
   pickerWrap.classList.add("hidden");
-  tabs.active.focus();
+  tabs.focused.focus();
 }
 
 function choosePicker(index: number): void {
-  const cmd = matches[index];
+  const entry = matches[index];
   closePicker();
-  cmd?.run();
+  entry?.choose();
 }
 
 pickerInput.addEventListener("input", () => {
@@ -206,27 +252,59 @@ pickerInput.addEventListener("input", () => {
 });
 
 pickerInput.addEventListener("keydown", (e) => {
-  switch (e.key) {
-    case "ArrowDown":
-      e.preventDefault();
-      activeIndex = Math.min(activeIndex + 1, matches.length - 1);
-      renderPicker();
-      break;
-    case "ArrowUp":
-      e.preventDefault();
-      activeIndex = Math.max(activeIndex - 1, 0);
-      renderPicker();
-      break;
-    case "Enter":
-      e.preventDefault();
-      choosePicker(activeIndex);
-      break;
-    case "Escape":
-      e.preventDefault();
-      closePicker();
-      break;
+  // Move with the arrows or ⌃N / ⌃P (Emacs convention); selection wraps around
+  // at both ends so it scrolls cyclically.
+  const key = e.key.toLowerCase();
+  const down = e.key === "ArrowDown" || (e.ctrlKey && key === "n");
+  const up = e.key === "ArrowUp" || (e.ctrlKey && key === "p");
+  const n = matches.length;
+
+  if (down) {
+    e.preventDefault();
+    if (n > 0) activeIndex = (activeIndex + 1) % n;
+    renderPicker();
+  } else if (up) {
+    e.preventDefault();
+    if (n > 0) activeIndex = (activeIndex - 1 + n) % n;
+    renderPicker();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    choosePicker(activeIndex);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closePicker();
   }
 });
+
+// ---- rename tab (⌘S) -------------------------------------------------------
+// NeoBoop is a scratchpad with no files, so ⌘S doesn't "save" — it names the
+// focused tab. The name lives in memory for the session only (not persisted).
+
+function openRename(): void {
+  renameInput.value = tabs.focusedCustomName;
+  renameInput.placeholder = tabs.focusedAutoTitle || "Tab name";
+  renameWrap.classList.remove("hidden");
+  renameInput.focus();
+  renameInput.select();
+}
+
+function closeRename(): void {
+  renameWrap.classList.add("hidden");
+  tabs.focused.focus();
+}
+
+renameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    tabs.renameFocused(renameInput.value);
+    closeRename();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeRename();
+  }
+});
+// Clicking away abandons the rename (no commit), like dismissing the picker.
+renameInput.addEventListener("blur", () => renameWrap.classList.add("hidden"));
 
 // ---- editor font zoom (⌘+ / ⌘- / ⌘0) --------------------------------------
 // App-wide zoom, the macOS way: one font size shared by every tab (and every
@@ -269,19 +347,28 @@ window.addEventListener("storage", (e) => {
 });
 
 // ---- global shortcuts -----------------------------------------------------
-// Note: Settings (⌘,) is handled by the native menu accelerator, which emits
-// "open-settings" — no JS handler needed here.
+// These are ⌘ (Cmd) shortcuts only. Ctrl is reserved for the native View-menu
+// accelerators — ⌃S/⌃V split, ⌃X close pane — so we deliberately do NOT treat
+// Ctrl as a Cmd alias here; otherwise ⌃S would fire both rename and split.
+// Note: Settings (⌘,) is handled by the native menu accelerator (emits
+// "open-settings") — no JS handler needed here.
 
 window.addEventListener("keydown", (e) => {
-  const mod = e.metaKey || e.ctrlKey;
-  if (!mod) return;
+  if (!e.metaKey || e.ctrlKey) return;
   const key = e.key.toLowerCase();
 
-  // Cmd-B: toggle the boop picker.
+  // Cmd-B: toggle the boop command palette.
   if (key === "b" && !e.shiftKey) {
     e.preventDefault();
-    if (pickerWrap.classList.contains("hidden")) openPicker();
+    if (pickerWrap.classList.contains("hidden")) openPicker(commandSession());
     else closePicker();
+    return;
+  }
+  // Cmd-S: rename the focused tab (NeoBoop has no files — see openRename).
+  if (key === "s" && !e.shiftKey) {
+    e.preventDefault();
+    if (renameWrap.classList.contains("hidden")) openRename();
+    else closeRename();
     return;
   }
   // Cmd-T: new tab. Cmd-W: close tab.
@@ -290,9 +377,13 @@ window.addEventListener("keydown", (e) => {
     tabs.newTab();
     return;
   }
+  // Cmd-W (close tab + its pane) is intentionally disabled for now — too easy
+  // to fat-finger and lose work. We still swallow the key (preventDefault) so a
+  // stray ⌘W doesn't fall through to the native "Close Window" and shut the
+  // whole window. Tabs are still closable on purpose via the ✕ button.
+  // Re-enable by restoring `tabs.closeTab()` here.
   if (key === "w" && !e.shiftKey) {
     e.preventDefault();
-    tabs.closeTab();
     return;
   }
   // Cmd-+ / Cmd-= : larger font. Cmd-- : smaller. Cmd-0 : reset.
@@ -324,6 +415,23 @@ window.addEventListener("keydown", (e) => {
     tabs.switchBy(-1);
     return;
   }
+  // Ctrl-S (竖屏 / side-by-side) and Ctrl-V (横屏 / stacked) are handled by the
+  // native View-menu accelerators, which emit "split-right" / "split-down" —
+  // see the listeners above. Same pattern as Settings (⌘,); no JS handler.
+
+  // Cmd-Opt-arrows : move focus to the neighbouring pane.
+  if (e.altKey) {
+    const dir =
+      key === "arrowleft" ? "left" :
+      key === "arrowright" ? "right" :
+      key === "arrowup" ? "up" :
+      key === "arrowdown" ? "down" : null;
+    if (dir) {
+      e.preventDefault();
+      tabs.focusDir(dir);
+      return;
+    }
+  }
 });
 
 function escapeHtml(s: string): string {
@@ -348,5 +456,5 @@ if (import.meta.env.DEV) {
 void loadUser(false).then(() => {
   const extra = allScripts.length - builtinScripts.length;
   const suffix = extra > 0 ? ` (+${extra} custom)` : "";
-  setStatus(`${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘T tab · ⌘, settings`, "info");
+  setStatus(`${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘T tab · ⌃S/⌃V split · ⌘, settings`, "info");
 });

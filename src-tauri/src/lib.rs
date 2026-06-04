@@ -72,19 +72,51 @@ pub fn run() {
                 .paste()
                 .select_all()
                 .build()?;
+            // View submenu carries the split commands; selecting one emits an
+            // event the frontend turns into a SplitTree mutation. Directional
+            // wording ("Split Right/Down") dodges the vertical/horizontal trap.
+            // Ctrl+S = 竖屏 (side-by-side, vertical divider); Ctrl+V = 横屏
+            // (stacked, horizontal divider) — the user's chosen mnemonics.
+            let split_right = MenuItemBuilder::with_id("split-right", "Split Right")
+                .accelerator("Control+S")
+                .build(handle)?;
+            let split_down = MenuItemBuilder::with_id("split-down", "Split Down")
+                .accelerator("Control+V")
+                .build(handle)?;
+            // Ctrl+X closes the focused pane but keeps its tab (parked, still
+            // in the tab bar). Closing a tab outright is ⌘W (macOS standard).
+            let close_pane = MenuItemBuilder::with_id("close-pane", "Close Pane")
+                .accelerator("Control+X")
+                .build(handle)?;
+            let view_menu = SubmenuBuilder::new(handle, "View")
+                .item(&split_right)
+                .item(&split_down)
+                .separator()
+                .item(&close_pane)
+                .build()?;
             let window_menu = SubmenuBuilder::new(handle, "Window")
                 .minimize()
                 .separator()
                 .close_window()
                 .build()?;
             MenuBuilder::new(handle)
-                .items(&[&app_menu, &edit_menu, &window_menu])
+                .items(&[&app_menu, &edit_menu, &view_menu, &window_menu])
                 .build()
         })
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == "settings" {
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "settings" => {
                 let _ = app.emit("open-settings", ());
             }
+            "split-right" => {
+                let _ = app.emit("split-right", ());
+            }
+            "split-down" => {
+                let _ = app.emit("split-down", ());
+            }
+            "close-pane" => {
+                let _ = app.emit("close-pane", ());
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running NeoBoop");

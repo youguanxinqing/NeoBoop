@@ -18,6 +18,32 @@ function themeFor(dark: boolean): Extension {
   return dark ? oneDark : [];
 }
 
+// Brand-coloured editor surfaces, loaded after the theme compartment so they
+// override oneDark / the default light theme. Everything derives from the
+// --theme CSS var (see styles.css), so the editor tracks the app's hue.
+//
+// Two greens that must stay distinguishable: the current-line highlight is a
+// faint, full-width *wash* (ambient — "you are here"), while the selection is a
+// stronger, more saturated *block* (deliberate — "you picked this"). Same hue,
+// different weight, so they read as one family yet never blur together.
+//
+// The active line is also gated on focus: CodeMirror keeps `.cm-activeLine`
+// decorated even when blurred, so an idle split pane would otherwise show a
+// line bar and look active. We blank it by default and only paint it under
+// `.cm-focused`.
+const editorTheme = EditorView.theme({
+  ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "transparent" },
+  "&.cm-focused .cm-activeLine": { backgroundColor: "var(--active-line)" },
+  "&.cm-focused .cm-activeLineGutter": { backgroundColor: "var(--active-line-gutter)" },
+  ".cm-selectionBackground": { backgroundColor: "var(--selection)" },
+  // Match the default theme's exact selector chain (0,5,0 specificity) or the
+  // built-in focused-selection colour wins and the selection stays lavender.
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+    backgroundColor: "var(--selection-focused)",
+  },
+  "::selection": { backgroundColor: "var(--selection-focused)" },
+});
+
 export class EditorPane {
   readonly view: EditorView;
   readonly dom: HTMLElement;
@@ -54,6 +80,7 @@ export class EditorPane {
         if (u.docChanged && this.modeName === "auto") this.scheduleDetect();
       }),
       keymap.of(extraKeymap),
+      editorTheme,
     ];
     this.view = new EditorView({
       state: EditorState.create({ doc: "", extensions }),

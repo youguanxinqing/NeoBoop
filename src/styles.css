@@ -3,8 +3,12 @@
      editor and the surrounding chrome read as a single surface. */
   --bg: #282c34;
   --fg: #abb2bf;
-  --accent: #528bff;
-  --info: #61afef;
+  /* Brand theme: one hue drives every accent in the chrome (status text,
+     selection, picker highlight, active line). Default is sage, echoing the
+     app icon — retheme the whole app by changing --theme alone. */
+  --theme: #93b88c;
+  --accent: var(--theme);
+  --info: var(--theme);
   --error: #e06c75;
   --picker-bg: #21252b;
   --border: #181a1f;
@@ -21,6 +25,14 @@
   --split-divider: rgba(255, 255, 255, 0.09);
   --split-divider-hover: var(--accent);
   --split-inactive-scrim: rgba(0, 0, 0, 0.28);
+  /* Current-line highlight — derived from --theme, so it always tracks the
+     brand hue. Only painted in the focused pane (see editor.ts). */
+  --active-line: color-mix(in srgb, var(--theme) 13%, transparent);
+  --active-line-gutter: color-mix(in srgb, var(--theme) 20%, transparent);
+  /* Selection: same hue as the active line but markedly stronger, so a
+     deliberate selection never blurs into the ambient current-line wash. */
+  --selection: color-mix(in srgb, var(--theme) 22%, transparent);
+  --selection-focused: color-mix(in srgb, var(--theme) 38%, transparent);
   color-scheme: dark;
 }
 
@@ -29,8 +41,10 @@
     /* One Light palette — paired with CodeMirror's default light theme. */
     --bg: #fafafa;
     --fg: #383a42;
-    --accent: #4078f2;
-    --info: #4078f2;
+    /* Deeper sage so it stays legible as text/accent on the light surface. */
+    --theme: #5e8a55;
+    --accent: var(--theme);
+    --info: var(--theme);
     --error: #e45649;
     --picker-bg: #ffffff;
     --border: #d4d4d4;
@@ -45,6 +59,10 @@
     --split-divider: rgba(0, 0, 0, 0.13);
     --split-divider-hover: var(--accent);
     --split-inactive-scrim: rgba(0, 0, 0, 0.05);
+    --active-line: color-mix(in srgb, var(--theme) 20%, transparent);
+    --active-line-gutter: color-mix(in srgb, var(--theme) 30%, transparent);
+    --selection: color-mix(in srgb, var(--theme) 26%, transparent);
+    --selection-focused: color-mix(in srgb, var(--theme) 42%, transparent);
     color-scheme: light;
   }
 }
@@ -489,6 +507,10 @@ body.split-dragging-column * {
   border: 1px solid var(--border);
   border-radius: 6px;
   outline: none;
+}
+.prefs-input.recording {
+  border-color: var(--theme);
+  box-shadow: 0 0 0 2px var(--active-line);
 }
 .prefs-button {
   flex: 0 0 auto;

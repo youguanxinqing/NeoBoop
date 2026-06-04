@@ -364,6 +364,14 @@ window.addEventListener("keydown", (e) => {
     else closePicker();
     return;
   }
+  // Cmd-P: jump straight into Select Pane (the tab switcher), skipping the
+  // command palette. Same overlay, just opened in the tab session directly.
+  if (key === "p" && !e.shiftKey) {
+    e.preventDefault();
+    if (pickerWrap.classList.contains("hidden")) openPicker(tabSession());
+    else closePicker();
+    return;
+  }
   // Cmd-S: rename the focused tab (NeoBoop has no files — see openRename).
   if (key === "s" && !e.shiftKey) {
     e.preventDefault();

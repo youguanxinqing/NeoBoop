@@ -3,9 +3,11 @@
 // itself: reading a user-chosen folder of .js scripts off disk.
 
 use std::fs;
+use std::str::FromStr;
 
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(serde::Serialize)]
 struct ScriptFile {
@@ -36,12 +38,48 @@ fn read_scripts(dir: String) -> Result<Vec<ScriptFile>, String> {
     Ok(out)
 }
 
+/// Bring the main window to the front (even if hidden/minimized) and tell the
+/// frontend to open a fresh boop. This is what the global "quick capture"
+/// shortcut does — summon NeoBoop from any app and start typing immediately.
+fn summon_new_boop<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit("new-boop", ());
+}
+
+/// (Re)binds the global quick-capture shortcut to `accelerator` (Tauri syntax,
+/// e.g. "Control+Alt+Space"). Called from the frontend on launch with the saved
+/// value, and again whenever the user records a new chord in Preferences. Any
+/// previous binding is cleared first. Returns an error string the UI can show
+/// when the accelerator is unparseable or already claimed by the system.
+#[tauri::command]
+fn set_global_shortcut<R: Runtime>(app: AppHandle<R>, accelerator: String) -> Result<(), String> {
+    let shortcut = Shortcut::from_str(&accelerator).map_err(|e| e.to_string())?;
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    gs.register(shortcut).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![read_scripts])
+        // Global shortcut: one handler fires for whichever chord is currently
+        // registered (we only ever keep one — the quick-capture binding).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        summon_new_boop(app);
+                    }
+                })
+                .build(),
+        )
+        .invoke_handler(tauri::generate_handler![read_scripts, set_global_shortcut])
         // Native menu bar. The app submenu carries a standard "Settings…" (⌘,)
         // item; selecting it emits "open-settings", which the frontend handles
         // by opening the Preferences window. The Edit submenu restores the
@@ -118,6 +156,30 @@ pub fn run() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running NeoBoop");
+        // Standard macOS behaviour: the red close button (and "Close Window")
+        // only hides the main window — the app stays alive so the global
+        // shortcut keeps working. Quitting is reserved for Cmd+Q / the Quit
+        // menu, which terminate the process directly without a CloseRequested.
+        // The preferences window is transient and closes normally.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building NeoBoop")
+        // Re-show the hidden window when its Dock icon is clicked (macOS), so a
+        // window that was "closed" to the background is recoverable without the
+        // shortcut.
+        .run(|app, event| {
+            if let RunEvent::Reopen { .. } = event {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+            }
+        });
 }

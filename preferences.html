@@ -20,6 +20,20 @@
             metadata header are treated as libraries you can <code>require()</code>.</span>
         </div>
       </section>
+
+      <section class="prefs-section">
+        <label class="prefs-label" for="prefs-shortcut">Global shortcut — open a new boop</label>
+        <div class="prefs-row">
+          <input id="prefs-shortcut" class="prefs-input" type="text" readonly
+                 placeholder="Not set" />
+          <button id="prefs-shortcut-record" class="prefs-button">Record…</button>
+        </div>
+        <div class="prefs-actions">
+          <button id="prefs-shortcut-reset" class="prefs-link">Reset to default</button>
+          <span id="prefs-shortcut-hint" class="prefs-hint">Press this from any app to summon NeoBoop
+            with a fresh boop. Needs at least one modifier (⌃⌥⇧⌘).</span>
+        </div>
+      </section>
     </main>
     <script type="module" src="/src/preferences.ts"></script>
   </body>

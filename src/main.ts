@@ -7,6 +7,7 @@ import { scripts as builtinScripts, libs } from "./scripts/registry";
 import { runScript, type BoopScript } from "./scripts/runtime";
 import { getUserDir, loadUserScripts } from "./scripts/userscripts";
 import { LANG_OPTIONS, type LangName } from "./languages";
+import { applyGlobalShortcut, getGlobalShortcut } from "./shortcut";
 
 const tabBarEl = document.getElementById("tab-bar")!;
 const editorEl = document.getElementById("editor")!;
@@ -91,7 +92,7 @@ async function openPreferences(): Promise<void> {
     url: "preferences.html",
     title: "Preferences",
     width: 560,
-    height: 220,
+    height: 340,
     resizable: false,
     center: true,
   });
@@ -104,6 +105,15 @@ void listen("scripts-folder-changed", () => void loadUser(true));
 void listen("split-right", () => tabs.splitPane("row"));
 void listen("split-down", () => tabs.splitPane("column"));
 void listen("close-pane", () => tabs.closePane());
+
+// ---- global quick-capture shortcut ----------------------------------------
+// Rust fires "new-boop" when the system-wide chord is pressed (after it has
+// already raised + focused the window); we just open a fresh tab. The chord
+// itself is (re)registered here on launch from the saved/default value.
+void listen("new-boop", () => tabs.newTab());
+void applyGlobalShortcut(getGlobalShortcut()).catch((err) =>
+  console.error("Failed to register global shortcut:", err),
+);
 
 // ---- run a script ---------------------------------------------------------
 

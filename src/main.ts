@@ -160,6 +160,16 @@ function commandSession(): PickerSession {
           choose: () => openPicker(tabSession()),
         },
         {
+          name: "Preview Markdown",
+          description: "Set this pane's format to Markdown",
+          badge: "action",
+          keywords: "preview markdown md format mode language render syntax highlight",
+          choose: () => {
+            tabs.focused.setMode("markdown");
+            syncLangSelect();
+          },
+        },
+        {
           name: "Settings…",
           description: "Custom scripts folder and preferences",
           badge: "action",

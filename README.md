@@ -70,7 +70,7 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 | <kbd>⌃S</kbd> | Split side-by-side (vertical divider) |
 | <kbd>⌃V</kbd> | Split stacked (horizontal divider) |
 | <kbd>⌃X</kbd> | Close the focused pane (keeps its tab) |
-| <kbd>⌘⌥</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> | Move focus between panes |
+| <kbd>⌃H</kbd> <kbd>⌃J</kbd> <kbd>⌃K</kbd> <kbd>⌃L</kbd> | Move focus between panes, Vim-style (← ↓ ↑ →) |
 
 **View & system**
 

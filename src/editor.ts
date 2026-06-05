@@ -12,6 +12,12 @@ import { EditorView, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detect, loadLanguage, type LangName } from "./languages";
+import {
+  clearHighlights as clearTermHighlights,
+  interestingWords,
+  toggleHighlight as toggleTermHighlight,
+} from "./highlight";
+import { editorContextMenu } from "./context-menu";
 
 /** Theme is reconfigured live (no editor rebuild) so dark/light follows the OS. */
 function themeFor(dark: boolean): Extension {
@@ -88,6 +94,11 @@ export class EditorPane {
       }),
       keymap.of(extraKeymap),
       editorTheme,
+      // Multi-colour "interesting words" highlighting (vim-interestingwords).
+      interestingWords(),
+      // Custom right-click menu (replaces the native one) with editing actions
+      // plus the highlight-colour swatches.
+      editorContextMenu(),
     ];
     this.view = new EditorView({
       state: EditorState.create({ doc: "", extensions }),
@@ -171,6 +182,19 @@ export class EditorPane {
       changes: { from: 0, to: this.view.state.doc.length, insert: text },
       selection: { anchor: 0 },
     });
+  }
+
+  /** Toggle the "interesting words" highlight for the current selection: colour
+   *  every occurrence of the selected text, or uncolour it if already lit. A
+   *  no-op when the selection is empty or spans multiple lines. */
+  toggleHighlight(): void {
+    const sel = this.selection;
+    if (sel) toggleTermHighlight(this.view, sel);
+  }
+
+  /** Remove every "interesting words" highlight in this pane. */
+  clearHighlights(): void {
+    clearTermHighlights(this.view);
   }
 
   /** Select a range and scroll it into view — used by global search to jump to

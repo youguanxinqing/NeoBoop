@@ -134,7 +134,7 @@ async function openPreferences(): Promise<void> {
     url: "preferences.html",
     title: "Preferences",
     width: 560,
-    height: 340,
+    height: 410,
     resizable: false,
     center: true,
   });
@@ -305,6 +305,20 @@ function commandSession(): PickerSession {
             tabs.focused.setMode("markdown");
             syncLangSelect();
           },
+        },
+        {
+          name: "Highlight Selection",
+          description: "Colour every occurrence of the selected text (⌘⇧H)",
+          badge: "action",
+          keywords: "highlight color colour mark interesting word selection emphasize toggle",
+          choose: () => tabs.focused.toggleHighlight(),
+        },
+        {
+          name: "Clear Highlights",
+          description: "Remove all colour highlights in this pane (⌘⇧K)",
+          badge: "action",
+          keywords: "clear remove highlight color colour unmark uncolor reset interesting words",
+          choose: () => tabs.focused.clearHighlights(),
         },
         {
           name: "Scratch History…",
@@ -734,6 +748,20 @@ window.addEventListener("keydown", (e) => {
   if (key === "0") {
     e.preventDefault();
     zoomFont(0);
+    return;
+  }
+  // Cmd-Shift-H: toggle "interesting words" highlight on the current selection.
+  // Colours every occurrence of the selected text, or uncolours it if already
+  // lit. See highlight.ts for why uncolour is instant.
+  if (e.shiftKey && key === "h") {
+    e.preventDefault();
+    tabs.focused.toggleHighlight();
+    return;
+  }
+  // Cmd-Shift-K: clear every highlight in the focused pane.
+  if (e.shiftKey && key === "k") {
+    e.preventDefault();
+    tabs.focused.clearHighlights();
     return;
   }
   // Cmd-Shift-] / [ : next / previous tab.

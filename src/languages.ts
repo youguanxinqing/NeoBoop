@@ -51,6 +51,28 @@ export async function loadLanguage(name: LangName): Promise<Extension> {
   return loader ? loader() : [];
 }
 
+/** File extension → editor mode, for files opened via Finder. Anything not
+ *  listed falls back to "auto" so content detection still gets a shot. */
+const EXT_LANG: Record<string, LangName> = {
+  js: "javascript", mjs: "javascript", cjs: "javascript",
+  ts: "javascript", tsx: "javascript", jsx: "javascript",
+  json: "json", jsonc: "json",
+  sql: "sql",
+  html: "html", htm: "html",
+  xml: "xml", svg: "xml", plist: "xml",
+  css: "css", scss: "css",
+  py: "python",
+  yml: "yaml", yaml: "yaml",
+  md: "markdown", markdown: "markdown",
+};
+
+/** Pick an editor mode from a file name's extension; "auto" when unknown. */
+export function langFromFilename(name: string): LangName {
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "auto";
+  return EXT_LANG[name.slice(dot + 1).toLowerCase()] ?? "auto";
+}
+
 /**
  * Conservative content-based detection: only returns a concrete language on a
  * strong signal, otherwise "text". A leading SQL/markup keyword or a JSON-shaped

@@ -53,7 +53,16 @@ install: build
     rm -rf "${target}"
     cp -R "{{built_app}}" "${target}"
     xattr -dr com.apple.quarantine "${target}" 2>/dev/null || true
-    echo "→ 已安装到 ${target}"
+    # Make the installed copy the authoritative Launch Services registration so
+    # Finder's "Open With" shows NeoBoop. Each `tauri build` registers stale
+    # copies (the target/ bundle + a temporary DMG mount) under the same bundle
+    # id; unregister those and the leftover app bundle so they can't shadow the
+    # real one with a doctype-less claim.
+    lsr=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    "${lsr}" -u "{{built_app}}" 2>/dev/null || true
+    rm -rf "{{built_app}}"
+    "${lsr}" -f "${target}"
+    echo "→ 已安装到 ${target}（已登记到 Launch Services）"
 
 # 构建 universal（arm64 + x86_64）.app + .dmg
 universal:

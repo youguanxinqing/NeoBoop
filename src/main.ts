@@ -1,6 +1,7 @@
 import "./styles.css";
 import { getAllWebviewWindows, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { TabManager } from "./tabs";
 import type { Direction } from "./split";
 import { search } from "./picker";
@@ -9,17 +10,29 @@ import { runScript, type BoopScript } from "./scripts/runtime";
 import { getUserDir, loadUserScripts } from "./scripts/userscripts";
 import { LANG_OPTIONS, type LangName } from "./languages";
 import { applyGlobalShortcut, getGlobalShortcut } from "./shortcut";
+import {
+  readManifest,
+  readScratchContent,
+  readSession,
+  readTextFile,
+  takeOpenedFiles,
+  type ScratchMeta,
+} from "./store";
 
 const tabBarEl = document.getElementById("tab-bar")!;
 const editorEl = document.getElementById("editor")!;
 const statusEl = document.getElementById("status-bar")!;
 const statusMsg = document.getElementById("status-msg")!;
+const docKindEl = document.getElementById("doc-kind")!;
 const langSelect = document.getElementById("lang-select") as HTMLSelectElement;
 const pickerWrap = document.getElementById("picker-wrap")!;
 const pickerInput = document.getElementById("picker-input") as HTMLInputElement;
 const pickerList = document.getElementById("picker-list")!;
 const renameWrap = document.getElementById("rename-wrap")!;
 const renameInput = document.getElementById("rename-input") as HTMLInputElement;
+const confirmWrap = document.getElementById("confirm-wrap")!;
+const confirmMsg = document.getElementById("confirm-msg")!;
+const confirmButtons = document.getElementById("confirm-buttons")!;
 
 // ---- theme: follow the OS -------------------------------------------------
 
@@ -42,12 +55,35 @@ for (const { value, label } of LANG_OPTIONS) {
 function syncLangSelect(): void {
   langSelect.value = tabs.focused.mode;
 }
+
+// Status-bar indicator of what the focused tab is backed by: an autosaved
+// scratch, or a real file on disk (with its path as tooltip, and a read-only
+// flag when the file can't be written in place).
+function updateDocKind(): void {
+  if (tabs.focusedKind === "file") {
+    const ro = tabs.focusedReadOnly;
+    docKindEl.textContent = ro ? "File · read-only" : "File";
+    docKindEl.title = tabs.focusedPath ?? "";
+    docKindEl.className = "doc-kind file" + (ro ? " readonly" : "");
+  } else {
+    docKindEl.textContent = "Scratch";
+    docKindEl.title = "Autosaved scratch — kept in Scratch History";
+    docKindEl.className = "doc-kind scratch";
+  }
+}
+
+/** Refresh everything bound to the focused tab (language picker + doc kind). */
+function syncStatus(): void {
+  syncLangSelect();
+  updateDocKind();
+}
+
 langSelect.addEventListener("change", () => {
   tabs.focused.setMode(langSelect.value as LangName);
   tabs.focused.focus();
 });
-tabs.onFocusChange = syncLangSelect;
-syncLangSelect();
+tabs.onFocusChange = syncStatus;
+syncStatus();
 
 // ---- script registry (built-in + user) -----------------------------------
 
@@ -116,6 +152,91 @@ void applyGlobalShortcut(getGlobalShortcut()).catch((err) =>
   console.error("Failed to register global shortcut:", err),
 );
 
+// ---- open files from Finder ("Open With NeoBoop") -------------------------
+// Rust reads the OS-opened file(s) and buffers them; we drain that buffer here.
+// Drained both on the "open-files" nudge (app already running) and once on boot
+// (cold launch, where the file arrived before this listener existed). The Rust
+// side empties the buffer atomically, so the two paths never double-open.
+
+async function drainOpenedFiles(): Promise<void> {
+  let files;
+  try {
+    files = await takeOpenedFiles();
+  } catch (err) {
+    console.error("Failed to take opened files:", err);
+    return;
+  }
+  if (!files.length) return;
+  for (const f of files) tabs.openFile(f);
+  syncStatus();
+  const ro = files.some((f) => f.readOnly);
+  setStatus(
+    `Opened ${files.length} file${files.length > 1 ? "s" : ""}${ro ? " (read-only — bad encoding)" : ""}`,
+    ro ? "error" : "info",
+  );
+}
+
+void listen("open-files", () => void drainOpenedFiles());
+
+// ---- save (⌘S) ------------------------------------------------------------
+// Real files write in place. Scratch / read-only / never-saved tabs come back
+// `needsPath`, so we run the native Save dialog and bind the result as a real
+// file (promoting a scratch — its history entry stays put). This is the VS Code
+// "⌘S on an untitled buffer pops Save As" behaviour.
+
+async function saveCmd(): Promise<void> {
+  const outcome = await tabs.saveFocused();
+  if (outcome.kind === "saved") {
+    setStatus(`Saved ${outcome.name}`, "info");
+  } else if (outcome.kind === "error") {
+    setStatus(`Save failed: ${outcome.message}`, "error");
+  } else if (outcome.kind === "needsPath") {
+    const path = await save({ defaultPath: outcome.suggested });
+    if (!path) return;
+    const r = await tabs.saveFocusedAs(path);
+    if (r.kind === "saved") setStatus(`Saved ${r.name}`, "info");
+    else if (r.kind === "error") setStatus(`Save failed: ${r.message}`, "error");
+    syncStatus();
+  }
+  // A successful in-place save flips the dirty dot off but doesn't change kind;
+  // still refresh so a scratch→file promotion updates the indicator.
+  updateDocKind();
+  tabs.focused.focus();
+}
+
+// ---- close with unsaved changes -------------------------------------------
+// A dirty real file routes its close through here for the macOS Save / Don't
+// Save / Cancel prompt. Scratch tabs never reach this — they're autosaved and
+// kept in history, so closing one is non-destructive.
+
+tabs.onCloseDirty = async (id) => {
+  tabs.showTab(id);
+  const choice = await confirmClose(tabs.focusedTitle || "this file");
+  if (choice === "cancel") return;
+  if (choice === "save") {
+    const r = await tabs.saveFocused();
+    if (r.kind === "needsPath") {
+      const path = await save({ defaultPath: r.suggested });
+      if (!path) return; // cancelling the Save dialog cancels the close
+      const r2 = await tabs.saveFocusedAs(path);
+      if (r2.kind === "error") {
+        setStatus(`Save failed: ${r2.message}`, "error");
+        return;
+      }
+    } else if (r.kind === "error") {
+      setStatus(`Save failed: ${r.message}`, "error");
+      return;
+    }
+  }
+  tabs.closeTab(id);
+};
+
+// Double-click a scratch tab to rename it (⌘S is now Save, not rename).
+tabs.onRenameRequest = (id) => {
+  tabs.showTab(id);
+  openRename();
+};
+
 // ---- run a script ---------------------------------------------------------
 
 function execute(script: BoopScript): void {
@@ -181,6 +302,13 @@ function commandSession(): PickerSession {
           },
         },
         {
+          name: "Scratch History…",
+          description: "Reopen a past scratch (all are kept forever)",
+          badge: "action",
+          keywords: "scratch history past previous recent notes drafts reopen archive",
+          choose: () => openPicker(scratchHistorySession()),
+        },
+        {
           name: "Settings…",
           description: "Custom scripts folder and preferences",
           badge: "action",
@@ -214,6 +342,28 @@ function tabSession(): PickerSession {
         choose: () => tabs.showTab(t.id),
       })),
   };
+}
+
+/** Scratch-history session (⌘B → "Scratch History…"): every scratch ever typed
+ *  is kept forever in the manifest; pick one to reopen it in a tab. Searchable
+ *  by name or first-line preview, ordered newest-first by the manager. */
+function scratchHistorySession(): PickerSession {
+  return {
+    placeholder: "Open a past scratch…",
+    build: () =>
+      tabs.scratchHistory().map((m) => ({
+        name: m.name || m.preview || "Untitled",
+        description: new Date(m.modified).toLocaleString(),
+        keywords: `${m.name ?? ""} ${m.preview}`,
+        choose: () => void openScratchFromHistory(m),
+      })),
+  };
+}
+
+async function openScratchFromHistory(meta: ScratchMeta): Promise<void> {
+  const content = await readScratchContent(meta.id);
+  tabs.openScratch(meta, content);
+  syncStatus();
 }
 
 let session: PickerSession = commandSession();
@@ -297,9 +447,10 @@ pickerInput.addEventListener("keydown", (e) => {
   }
 });
 
-// ---- rename tab (⌘S) -------------------------------------------------------
-// NeoBoop is a scratchpad with no files, so ⌘S doesn't "save" — it names the
-// focused tab. The name lives in memory for the session only (not persisted).
+// ---- rename scratch tab (double-click) -------------------------------------
+// ⌘S is now Save. A scratch's name is set by double-clicking its tab; for a
+// scratch the name persists into the history manifest, for a real file the
+// name is its filename (these tabs aren't renamable here).
 
 function openRename(): void {
   renameInput.value = tabs.focusedCustomName;
@@ -326,6 +477,57 @@ renameInput.addEventListener("keydown", (e) => {
 });
 // Clicking away abandons the rename (no commit), like dismissing the picker.
 renameInput.addEventListener("blur", () => renameWrap.classList.add("hidden"));
+
+// ---- unsaved-changes prompt ------------------------------------------------
+// A small in-app modal for the Save / Don't Save / Cancel decision when closing
+// a dirty real file. The dialog plugin only offers 2-button prompts, and this
+// matches the app's existing overlay style anyway. Returns the chosen action;
+// Escape (or clicking the backdrop) is Cancel, Enter is Save.
+
+type CloseChoice = "save" | "discard" | "cancel";
+let confirmResolve: ((c: CloseChoice) => void) | null = null;
+
+function confirmClose(name: string): Promise<CloseChoice> {
+  confirmMsg.textContent = `Save changes to “${name}” before closing?`;
+  confirmButtons.innerHTML = "";
+  const mk = (label: string, choice: CloseChoice, primary = false) => {
+    const b = document.createElement("button");
+    b.className = "confirm-btn" + (primary ? " primary" : "");
+    b.textContent = label;
+    b.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      finishConfirm(choice);
+    });
+    confirmButtons.appendChild(b);
+  };
+  // Order mirrors macOS: Save (default) · Cancel · Don't Save.
+  mk("Save", "save", true);
+  mk("Cancel", "cancel");
+  mk("Don't Save", "discard");
+  confirmWrap.classList.remove("hidden");
+  confirmWrap.focus();
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+  });
+}
+
+function finishConfirm(choice: CloseChoice): void {
+  confirmWrap.classList.add("hidden");
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  resolve?.(choice);
+  tabs.focused.focus();
+}
+
+confirmWrap.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    finishConfirm("cancel");
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    finishConfirm("save");
+  }
+});
 
 // ---- editor font zoom (⌘+ / ⌘- / ⌘0) --------------------------------------
 // App-wide zoom, the macOS way: one font size shared by every tab (and every
@@ -393,26 +595,25 @@ window.addEventListener("keydown", (e) => {
     else closePicker();
     return;
   }
-  // Cmd-S: rename the focused tab (NeoBoop has no files — see openRename).
+  // Cmd-S: save. Real files write in place; a scratch pops Save As (promote).
   if (key === "s" && !e.shiftKey) {
     e.preventDefault();
-    if (renameWrap.classList.contains("hidden")) openRename();
-    else closeRename();
+    void saveCmd();
     return;
   }
-  // Cmd-T: new tab. Cmd-W: close tab.
+  // Cmd-T: new tab.
   if (key === "t" && !e.shiftKey) {
     e.preventDefault();
     tabs.newTab();
     return;
   }
-  // Cmd-W (close tab + its pane) is intentionally disabled for now — too easy
-  // to fat-finger and lose work. We still swallow the key (preventDefault) so a
-  // stray ⌘W doesn't fall through to the native "Close Window" and shut the
-  // whole window. Tabs are still closable on purpose via the ✕ button.
-  // Re-enable by restoring `tabs.closeTab()` here.
+  // Cmd-W: close the focused tab. A dirty real file prompts to save first
+  // (see tabs.onCloseDirty); scratch tabs close freely (autosaved + in history).
+  // We always preventDefault so a stray ⌘W never falls through to the native
+  // "Close Window" and shuts the whole window.
   if (key === "w" && !e.shiftKey) {
     e.preventDefault();
+    tabs.requestClose();
     return;
   }
   // Cmd-+ / Cmd-= : larger font. Cmd-- : smaller. Cmd-0 : reset.
@@ -496,10 +697,50 @@ if (import.meta.env.DEV) {
   };
 }
 
+// ---- session restore -------------------------------------------------------
+// Reopen the tabs from last launch: real files by path, scratch by id (content
+// from the managed store). The manifest is always loaded first so scratch-id
+// allocation this session doesn't collide with history. A file that moved or was
+// deleted is skipped, not fatal. The pristine empty boot tab is reused by the
+// first restored doc (see TabManager.acquireTab), so there's no leftover blank.
+
+async function restoreSession(): Promise<void> {
+  const [manifest, entries] = await Promise.all([readManifest(), readSession()]);
+  tabs.loadManifest(manifest);
+  if (!entries.length) return;
+  const byId = new Map<number, ScratchMeta>(manifest.map((m) => [m.id, m]));
+  let focusId: number | undefined;
+  for (const e of entries) {
+    try {
+      if (e.kind === "file" && e.path) {
+        const id = tabs.openFile(await readTextFile(e.path));
+        if (e.focused) focusId = id;
+      } else if (e.kind === "scratch" && e.scratchId != null) {
+        const meta = byId.get(e.scratchId);
+        if (!meta) continue;
+        const id = tabs.openScratch(meta, await readScratchContent(e.scratchId));
+        if (e.focused) focusId = id;
+      }
+    } catch (err) {
+      console.error("Session restore skipped an entry:", e, err);
+    }
+  }
+  if (focusId != null) tabs.focusTab(focusId);
+  syncStatus();
+}
+
 // ---- boot -----------------------------------------------------------------
 
-void loadUser(false).then(() => {
+void (async () => {
+  await restoreSession();
+  await loadUser(false);
   const extra = allScripts.length - builtinScripts.length;
   const suffix = extra > 0 ? ` (+${extra} custom)` : "";
-  setStatus(`${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘T tab · ⌃S/⌃V split · ⌘, settings`, "info");
-});
+  setStatus(
+    `${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘S save · ⌘T tab · ⌃S/⌃V split`,
+    "info",
+  );
+  // Pick up any file the app was cold-launched with (Finder "Open With…").
+  // Runs last so an opened-file message wins the banner.
+  await drainOpenedFiles();
+})();

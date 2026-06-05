@@ -10,6 +10,8 @@
   --accent: var(--theme);
   --info: var(--theme);
   --error: #e06c75;
+  /* Unsaved-file dot — an ink green that reads against the dark tab surface. */
+  --dirty: #3a9b66;
   --picker-bg: #21252b;
   --border: #181a1f;
   --tabbar-bg: #21252b;
@@ -46,6 +48,8 @@
     --accent: var(--theme);
     --info: var(--theme);
     --error: #e45649;
+    /* Deeper ink green on the light surface so the dot stays legible. */
+    --dirty: #1f6b46;
     --picker-bg: #ffffff;
     --border: #d4d4d4;
     --tabbar-bg: #dcdce0;
@@ -104,6 +108,22 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Document-kind indicator: scratch vs real file. Plain, understated text in its
+   own muted colour (so it doesn't flip with the status message's info/error
+   tint) — no pill, no highlight. */
+.doc-kind {
+  flex: 0 0 auto;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--tab-fg);
+}
+.doc-kind.readonly {
+  opacity: 0.8;
+}
+
 .lang-select {
   flex: 0 0 auto;
   appearance: none;
@@ -347,6 +367,22 @@ body.split-dragging-column * {
   background: var(--tab-close-hover-bg);
 }
 
+/* Unsaved real file: the close button shows a small ink-green dot at rest (the
+   macOS / VS Code "modified" marker) and reveals the ✕ on hover. */
+.tab.dirty .tab-close {
+  opacity: 1;
+}
+.tab.dirty .tab-close::before {
+  content: "●";
+  font-size: 7px;
+  color: var(--dirty);
+}
+.tab.dirty .tab-close:hover::before {
+  content: "✕";
+  font-size: 9px;
+  color: var(--tab-active-fg);
+}
+
 .tab-add {
   flex: 0 0 auto;
   width: 32px;
@@ -424,6 +460,56 @@ body.split-dragging-column * {
   color: var(--fg);
   font-size: 15px;
   padding: 12px 14px;
+}
+
+/* ---- unsaved-changes prompt (close a dirty file) ---- */
+.confirm-wrap {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 84vw);
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 11;
+  padding: 16px;
+  outline: none;
+}
+.confirm-wrap.hidden {
+  display: none;
+}
+.confirm-msg {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-btn {
+  padding: 5px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--tab-hover-bg);
+  color: var(--fg);
+  cursor: default;
+}
+.confirm-btn:hover {
+  background: var(--tab-active-bg);
+}
+.confirm-btn.primary {
+  background: var(--theme);
+  border-color: var(--theme);
+  color: #fff;
+}
+.confirm-btn.primary:hover {
+  filter: brightness(1.08);
 }
 
 .picker-list {

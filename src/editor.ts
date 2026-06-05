@@ -59,6 +59,10 @@ export class EditorPane {
   /** Called when the effective language changes, so the picker can refresh. */
   onLanguageChange: (() => void) | null = null;
 
+  /** Called on every user/programmatic doc edit, so the tab layer can update
+   *  the dirty marker and schedule a scratch autosave. */
+  onDocChange: (() => void) | null = null;
+
   constructor(
     parent: HTMLElement,
     dark: boolean,
@@ -75,9 +79,12 @@ export class EditorPane {
       this.theme.of(themeFor(dark)),
       this.language.of([]),
       EditorView.lineWrapping,
-      // Re-detect on edits while in auto mode (debounced).
+      // Re-detect on edits while in auto mode (debounced); always notify the
+      // tab layer so dirty/autosave can react.
       EditorView.updateListener.of((u) => {
-        if (u.docChanged && this.modeName === "auto") this.scheduleDetect();
+        if (!u.docChanged) return;
+        if (this.modeName === "auto") this.scheduleDetect();
+        this.onDocChange?.();
       }),
       keymap.of(extraKeymap),
       editorTheme,
@@ -154,6 +161,16 @@ export class EditorPane {
         changes: { from: 0, to: this.view.state.doc.length, insert: text },
       });
     }
+  }
+
+  /** Replace the whole document outright (loading a file opened from Finder).
+   *  Unlike `apply`, this never touches the selection model — it's a load, not
+   *  a Boop transform. The caret lands at the start of the freshly-loaded doc. */
+  setContent(text: string): void {
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: text },
+      selection: { anchor: 0 },
+    });
   }
 
   focus(): void {

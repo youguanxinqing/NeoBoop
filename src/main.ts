@@ -2,6 +2,7 @@ import "./styles.css";
 import { getAllWebviewWindows, WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { TabManager } from "./tabs";
+import type { Direction } from "./split";
 import { search } from "./picker";
 import { scripts as builtinScripts, libs } from "./scripts/registry";
 import { runScript, type BoopScript } from "./scripts/runtime";
@@ -447,20 +448,36 @@ window.addEventListener("keydown", (e) => {
   // native View-menu accelerators, which emit "split-right" / "split-down" —
   // see the listeners above. Same pattern as Settings (⌘,); no JS handler.
 
-  // Cmd-Opt-arrows : move focus to the neighbouring pane.
-  if (e.altKey) {
-    const dir =
-      key === "arrowleft" ? "left" :
-      key === "arrowright" ? "right" :
-      key === "arrowup" ? "up" :
-      key === "arrowdown" ? "down" : null;
-    if (dir) {
-      e.preventDefault();
-      tabs.focusDir(dir);
-      return;
-    }
-  }
 });
+
+// Ctrl-H/J/K/L : move focus to the neighbouring pane, Vim-style
+// (h ← / j ↓ / k ↑ / l →). Handled in the capture phase so it beats
+// CodeMirror's mac emacs bindings (Ctrl-H deletes a char, Ctrl-K kills to
+// end of line). We only swallow the key when focus actually moves — i.e.
+// there IS a pane that way — otherwise we let it fall through so single-pane
+// editing keeps Ctrl-H / Ctrl-K.
+const PANE_DIRS: Record<string, Direction> = {
+  h: "left",
+  j: "down",
+  k: "up",
+  l: "right",
+};
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    // Don't steal keys while an overlay (palette / rename) is open.
+    if (!pickerWrap.classList.contains("hidden")) return;
+    if (!renameWrap.classList.contains("hidden")) return;
+    const dir = PANE_DIRS[e.key.toLowerCase()];
+    if (!dir) return;
+    if (tabs.focusDir(dir)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  },
+  true,
+);
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>

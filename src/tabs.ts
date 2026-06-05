@@ -129,8 +129,11 @@ export class TabManager {
     if (this.split.closeFocused()) this.focused.focus();
   }
 
-  focusDir(dir: Direction): void {
-    this.split.navigate(dir);
+  /** Move focus to the neighbouring pane in `dir`. Returns whether it moved
+   *  (false when there's no pane that way — caller can let the key fall
+   *  through to the editor). */
+  focusDir(dir: Direction): boolean {
+    return this.split.navigate(dir);
   }
 
   // ---- tab switcher (⌘B → Select Pane) ------------------------------------

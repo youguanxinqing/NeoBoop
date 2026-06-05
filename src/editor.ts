@@ -173,6 +173,16 @@ export class EditorPane {
     });
   }
 
+  /** Select a range and scroll it into view — used by global search to jump to
+   *  a hit. Offsets are clamped to the current doc length for safety. */
+  revealRange(from: number, to: number): void {
+    const len = this.view.state.doc.length;
+    const a = Math.max(0, Math.min(from, len));
+    const b = Math.max(0, Math.min(to, len));
+    this.view.dispatch({ selection: { anchor: a, head: b }, scrollIntoView: true });
+    this.view.focus();
+  }
+
   focus(): void {
     this.view.focus();
   }

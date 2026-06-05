@@ -1,0 +1,306 @@
+<!doctype html>
+<!--
+  DESIGN MOCKUP — global cross-tab search (⌃X ⌃F). Static HTML only, no logic.
+  Open in a browser to evaluate the look. Use the toggle (top-right) to compare
+  light / dark. Tokens are copied from src/styles.css so it matches the real app.
+
+  What it shows: a ⌘B-style overlay that searches tab NAMES + CONTENTS at once.
+  Each result = a tab with matches: tab name (matched chars highlighted) + a
+  kind badge + a match count, and a content snippet with the query highlighted.
+  Selecting jumps to that tab (and its first match).
+-->
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>NeoBoop — Global Search mockup</title>
+    <style>
+      :root,
+      [data-theme="dark"] {
+        --bg: #282c34;
+        --fg: #abb2bf;
+        --theme: #93b88c;
+        --accent: var(--theme);
+        --picker-bg: #21252b;
+        --border: #181a1f;
+        --tabbar-bg: #21252b;
+        --tab-divider: #3a3f4b;
+        --tab-fg: #868d9a;
+        --tab-active-fg: #d7dae0;
+        --tab-active-bg: #282c34;
+        --tab-hover-bg: #2c313a;
+        --editor-fg: #6b7280;
+        --hit: color-mix(in srgb, var(--theme) 32%, transparent);
+        --hit-strong: color-mix(in srgb, var(--theme) 52%, transparent);
+        color-scheme: dark;
+      }
+      [data-theme="light"] {
+        --bg: #fafafa;
+        --fg: #383a42;
+        --theme: #5e8a55;
+        --accent: var(--theme);
+        --picker-bg: #ffffff;
+        --border: #d4d4d4;
+        --tabbar-bg: #dcdce0;
+        --tab-divider: #c2c2c7;
+        --tab-fg: #5c5c63;
+        --tab-active-fg: #1d1d20;
+        --tab-active-bg: #fafafa;
+        --tab-hover-bg: #d0d0d5;
+        --editor-fg: #a0a1a7;
+        --hit: color-mix(in srgb, var(--theme) 26%, transparent);
+        --hit-strong: color-mix(in srgb, var(--theme) 42%, transparent);
+        color-scheme: light;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* faint editor behind, to read the overlay in context */
+      .behind {
+        position: fixed;
+        inset: 0;
+        padding: 60px 40px;
+        font-family: "SF Mono", ui-monospace, Menlo, monospace;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--editor-fg);
+        opacity: 0.5;
+        white-space: pre;
+        user-select: none;
+        overflow: hidden;
+      }
+      .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.18); }
+
+      /* ---- the overlay (mirrors .picker-wrap) ---- */
+      .gs {
+        position: fixed;
+        top: 44px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(640px, 92vw);
+        background: var(--picker-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+      }
+
+      .gs-input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 11px 13px;
+        border-bottom: 1px solid var(--border);
+      }
+      .gs-magnifier {
+        flex: 0 0 auto;
+        width: 15px; height: 15px;
+        opacity: 0.55;
+      }
+      .gs-input {
+        flex: 1 1 auto;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: var(--fg);
+        font-size: 15px;
+        font-family: inherit;
+      }
+      .gs-input::placeholder { color: var(--tab-fg); }
+      .gs-chord {
+        flex: 0 0 auto;
+        display: inline-flex;
+        gap: 3px;
+      }
+      .gs-key {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--tab-fg);
+        background: var(--tab-hover-bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+
+      .gs-summary {
+        padding: 6px 14px;
+        font-size: 11px;
+        color: var(--tab-fg);
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--tab-hover-bg) 40%, transparent);
+      }
+      .gs-summary b { color: var(--fg); font-weight: 600; }
+
+      .gs-list {
+        list-style: none;
+        margin: 0;
+        padding: 5px;
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .gs-item {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 8px 11px;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      .gs-item:hover { background: var(--tab-hover-bg); }
+      .gs-item.active { background: var(--accent); }
+
+      .gs-row1 {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+      }
+      .gs-name {
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gs-badge {
+        flex: 0 0 auto;
+        font-size: 9px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      .gs-badge.scratch { background: color-mix(in srgb, var(--theme) 24%, transparent); color: var(--fg); }
+      .gs-badge.file { background: #8a8f99; color: #fff; }
+      .gs-count {
+        flex: 0 0 auto;
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--tab-fg);
+        font-variant-numeric: tabular-nums;
+      }
+      .gs-snippet {
+        font-family: "SF Mono", ui-monospace, Menlo, monospace;
+        font-size: 11.5px;
+        line-height: 1.45;
+        color: var(--tab-fg);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gs-line {
+        color: var(--tab-fg);
+        opacity: 0.7;
+        margin-right: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* match highlight */
+      mark {
+        background: var(--hit);
+        color: inherit;
+        border-radius: 3px;
+        padding: 0 1px;
+      }
+      .gs-name mark { background: var(--hit-strong); }
+      /* keep highlights legible on the selected (sage) row */
+      .gs-item.active,
+      .gs-item.active .gs-name,
+      .gs-item.active .gs-count,
+      .gs-item.active .gs-snippet { color: #fff; }
+      .gs-item.active mark { background: rgba(255, 255, 255, 0.30); color: #fff; }
+      .gs-item.active .gs-badge.scratch { background: rgba(255,255,255,0.22); color: #fff; }
+
+      .gs-footer {
+        display: flex;
+        gap: 14px;
+        padding: 7px 14px;
+        border-top: 1px solid var(--border);
+        font-size: 10.5px;
+        color: var(--tab-fg);
+      }
+      .gs-footer .gs-key { margin-right: 4px; }
+
+      .toggle {
+        position: fixed;
+        top: 14px; right: 16px;
+        font: 12px -apple-system, sans-serif;
+        color: var(--tab-fg);
+        background: var(--picker-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">明 / 暗</button>
+
+    <div class="behind">local upload_url=$(curl -G 'https://api.longbridge.xyz/v1/file/upload_url' \
+  --data-urlencode 'prefix=agents' \
+  --data-urlencode 'service=lb.portai.knowledge' \
+  -H 'content-type: application/json' \
+  -H 'x-app-id: longbridge' \
+  ...
+echo $upload_url</div>
+    <div class="scrim"></div>
+
+    <div class="gs" role="dialog" aria-label="Search all tabs">
+      <div class="gs-input-row">
+        <svg class="gs-magnifier" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="7" cy="7" r="4.5" /><line x1="10.5" y1="10.5" x2="14" y2="14" stroke-linecap="round" />
+        </svg>
+        <input class="gs-input" value="upload" placeholder="Search all tabs — names & contents…" />
+        <span class="gs-chord"><span class="gs-key">⌃X</span><span class="gs-key">⌃F</span></span>
+      </div>
+
+      <div class="gs-summary"><b>6</b> matches in <b>3</b> tabs</div>
+
+      <ul class="gs-list">
+        <!-- name + content match, selected -->
+        <li class="gs-item active">
+          <div class="gs-row1">
+            <span class="gs-name"><mark>Upload</mark> helper</span>
+            <span class="gs-badge scratch">scratch</span>
+            <span class="gs-count">3 matches</span>
+          </div>
+          <div class="gs-snippet"><span class="gs-line">L4</span>the <mark>upload</mark> flow needs a freshly signed token before…</div>
+        </li>
+
+        <!-- content-only match in a real file -->
+        <li class="gs-item">
+          <div class="gs-row1">
+            <span class="gs-name">get_download.sh</span>
+            <span class="gs-badge file">file</span>
+            <span class="gs-count">2 matches</span>
+          </div>
+          <div class="gs-snippet"><span class="gs-line">L1</span>local <mark>upload</mark>_url=$(curl -G '…/v1/file/<mark>upload</mark>_url' \</div>
+        </li>
+
+        <!-- content-only match in a scratch -->
+        <li class="gs-item">
+          <div class="gs-row1">
+            <span class="gs-name">API draft</span>
+            <span class="gs-badge scratch">scratch</span>
+            <span class="gs-count">1 match</span>
+          </div>
+          <div class="gs-snippet"><span class="gs-line">L12</span>POST /v1/file/<mark>upload</mark> — multipart, returns the object key</div>
+        </li>
+      </ul>
+
+      <div class="gs-footer">
+        <span><span class="gs-key">↑</span><span class="gs-key">↓</span> navigate</span>
+        <span><span class="gs-key">↵</span> open tab</span>
+        <span><span class="gs-key">esc</span> close</span>
+      </div>
+    </div>
+  </body>
+</html>

@@ -460,6 +460,29 @@ export class TabManager {
     this.focused.focus();
   }
 
+  // ---- global search (⌃X ⌃F) ----------------------------------------------
+
+  /** Snapshot of every open tab for cross-tab search: display title + full
+   *  content. (Scratch history isn't included — only what's open.) */
+  documentsForSearch(): { id: number; title: string; kind: TabKind; text: string }[] {
+    return this.tabs.map((t) => ({
+      id: t.id,
+      title: this.titleFor(t),
+      kind: t.kind,
+      text: t.pane.fullText,
+    }));
+  }
+
+  /** Jump to a tab and select a hit inside it (from global search). When the
+   *  match is in the tab name only (`from < 0`), just show + focus the tab. */
+  revealMatch(id: number, from: number, to: number): void {
+    if (!this.tabs.some((t) => t.id === id)) return;
+    this.split.showTab(id);
+    const pane = this.paneFor(id);
+    if (pane && from >= 0) pane.revealRange(from, to);
+    else this.focused.focus();
+  }
+
   /** One-line content snippet, for disambiguating tabs in the switcher. */
   private previewFor(tab: Tab): string {
     return tab.pane.fullText.replace(/\s+/g, " ").trim().slice(0, 80);

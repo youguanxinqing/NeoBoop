@@ -314,14 +314,18 @@ export class SplitTree {
       branch.sizes[b] = sumAB - branch.sizes[a];
       this.applySizes(branch);
     };
+    // Cursor class is keyed by axis to match the CSS: `-row` → col-resize
+    // (vertical divider, drag changes width), `-column` → row-resize. Both this
+    // and `split-dragging` must be cleared on mouseup, or the resize cursor
+    // sticks to the whole window after the drag ends.
+    const axisClass = `split-dragging-${branch.axis}`;
     const onUp = (): void => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      document.body.classList.remove("split-dragging");
+      document.body.classList.remove("split-dragging", axisClass);
       this.onLayoutChange?.(); // editors changed width — let the host re-measure.
     };
-    document.body.classList.add(horizontal ? "split-dragging-col" : "split-dragging-row");
-    document.body.classList.add("split-dragging");
+    document.body.classList.add("split-dragging", axisClass);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }

@@ -3,16 +3,157 @@
 // itself: reading a user-chosen folder of .js scripts off disk.
 
 use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(serde::Serialize)]
 struct ScriptFile {
     name: String,
     source: String,
+}
+
+/// A text file loaded from disk — opened from Finder, dropped on the icon, or
+/// reopened on session restore. Content is always normalised to LF for the
+/// editor; `eol`/`final_newline` record the original shape so a later save
+/// writes it back unchanged rather than silently rewriting line endings.
+///
+/// `read_only` is set when the bytes aren't valid UTF-8 (we still show them,
+/// decoded lossily, but must not write the mangled result back) or the file
+/// isn't writable. The frontend disables ⌘S for read-only docs.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextFile {
+    path: String,
+    name: String,
+    content: String,
+    encoding_ok: bool,
+    read_only: bool,
+    eol: String,
+    final_newline: bool,
+}
+
+/// Files the OS handed us via `RunEvent::Opened` but the webview hasn't picked
+/// up yet. This is the single source of truth: a cold launch drains it once the
+/// frontend boots, and a warm open drains it in response to the "open-files"
+/// nudge — `take_opened_files` empties it atomically, so neither path can
+/// deliver the same file twice.
+#[derive(Default)]
+struct PendingOpens(Mutex<Vec<TextFile>>);
+
+/// Cap on what we'll slurp into the editor. NeoBoop is a text scratchpad; this
+/// keeps a fat-fingered "Open With" on a multi-gigabyte binary from wedging the
+/// webview.
+const MAX_OPEN_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Read a path into a `TextFile`, or `None` if it isn't a regular file, is too
+/// big, or can't be read. Detects CRLF vs LF and a trailing newline, then hands
+/// back LF-normalised content; `encoding_ok` is false when we had to decode
+/// lossily, which forces the doc read-only so a save can't corrupt the original.
+fn read_text_file_at(path: &Path) -> Option<TextFile> {
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_OPEN_BYTES {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    let (content_raw, encoding_ok) = match String::from_utf8(bytes) {
+        Ok(s) => (s, true),
+        Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), false),
+    };
+    let eol = if content_raw.contains("\r\n") { "crlf" } else { "lf" };
+    let final_newline = content_raw.ends_with('\n');
+    // Normalise to LF for CodeMirror; lone CRs collapse too so mixed files don't
+    // confuse the editor. The original `eol` is what we restore on save.
+    let content = content_raw.replace("\r\n", "\n").replace('\r', "\n");
+    let read_only = !encoding_ok || meta.permissions().readonly();
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Untitled")
+        .to_string();
+    Some(TextFile {
+        path: path.to_string_lossy().into_owned(),
+        name,
+        content,
+        encoding_ok,
+        read_only,
+        eol: eol.to_string(),
+        final_newline,
+    })
+}
+
+/// Drain and return any files the OS asked us to open. Called by the frontend
+/// on boot (cold launch) and whenever the "open-files" event fires (warm open).
+#[tauri::command]
+fn take_opened_files(state: State<PendingOpens>) -> Vec<TextFile> {
+    std::mem::take(&mut *state.0.lock().unwrap())
+}
+
+/// Read a real file by absolute path (Save-target reopen / session restore).
+#[tauri::command]
+fn read_text_file(path: String) -> Result<TextFile, String> {
+    read_text_file_at(Path::new(&path)).ok_or_else(|| format!("cannot read {path}"))
+}
+
+/// Write `content` (LF-joined, as the editor holds it) to `path`, restoring the
+/// document's original line-ending style and trailing-newline so saving an
+/// untouched-elsewhere file is a byte-for-byte no-op on those axes.
+#[tauri::command]
+fn write_text_file(
+    path: String,
+    content: String,
+    eol: String,
+    final_newline: bool,
+) -> Result<(), String> {
+    let nl = if eol == "crlf" { "\r\n" } else { "\n" };
+    let mut body = if nl == "\n" {
+        content
+    } else {
+        content.replace('\n', nl)
+    };
+    if final_newline && !body.ends_with(nl) {
+        body.push_str(nl);
+    }
+    fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+/// Resolve `rel` under the app-data dir, refusing any traversal out of it. This
+/// is the sandbox for NeoBoop's own bookkeeping — the scratch store, its
+/// manifest, and the session file all live here, never user-visible paths.
+fn app_data_path<R: Runtime>(app: &AppHandle<R>, rel: &str) -> Result<PathBuf, String> {
+    if rel.contains("..") {
+        return Err("invalid path".into());
+    }
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join(rel))
+}
+
+/// Read a file under the app-data dir; `None` (not an error) when it's absent,
+/// so first-run reads of the manifest/session just come back empty.
+#[tauri::command]
+fn app_data_read<R: Runtime>(app: AppHandle<R>, rel: String) -> Result<Option<String>, String> {
+    let path = app_data_path(&app, &rel)?;
+    match fs::read_to_string(&path) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Write a file under the app-data dir, creating parent dirs as needed. Backs
+/// the scratch store (`scratch/<id>.txt`), its `manifest.json`, and `session.json`.
+#[tauri::command]
+fn app_data_write<R: Runtime>(app: AppHandle<R>, rel: String, content: String) -> Result<(), String> {
+    let path = app_data_path(&app, &rel)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 /// Reads all top-level `*.js` files in `dir`, returning name (without extension)
@@ -66,6 +207,7 @@ fn set_global_shortcut<R: Runtime>(app: AppHandle<R>, accelerator: String) -> Re
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(PendingOpens::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // Global shortcut: one handler fires for whichever chord is currently
@@ -79,7 +221,15 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![read_scripts, set_global_shortcut])
+        .invoke_handler(tauri::generate_handler![
+            read_scripts,
+            set_global_shortcut,
+            take_opened_files,
+            read_text_file,
+            write_text_file,
+            app_data_read,
+            app_data_write
+        ])
         // Native menu bar. The app submenu carries a standard "Settings…" (⌘,)
         // item; selecting it emits "open-settings", which the frontend handles
         // by opening the Preferences window. The Edit submenu restores the
@@ -174,12 +324,97 @@ pub fn run() {
         // Re-show the hidden window when its Dock icon is clicked (macOS), so a
         // window that was "closed" to the background is recoverable without the
         // shortcut.
-        .run(|app, event| {
-            if let RunEvent::Reopen { .. } = event {
+        .run(|app, event| match event {
+            RunEvent::Reopen { .. } => {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.show();
                     let _ = win.set_focus();
                 }
             }
+            // Finder "Open With NeoBoop", dragging a file onto the icon, or
+            // `open -a NeoBoop file`. Read each file here (the web layer can't
+            // touch arbitrary paths), stash it, raise the window, and nudge the
+            // frontend to drain. On a cold launch the window may not be ready;
+            // the buffer survives until the frontend's boot drain picks it up.
+            RunEvent::Opened { urls } => {
+                let files: Vec<TextFile> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .filter_map(|p| read_text_file_at(&p))
+                    .collect();
+                if files.is_empty() {
+                    return;
+                }
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.unminimize();
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+                app.state::<PendingOpens>().0.lock().unwrap().extend(files);
+                let _ = app.emit("open-files", ());
+            }
+            _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("neoboop_test_{name}"))
+    }
+
+    #[test]
+    fn write_lf_adds_trailing_newline() {
+        let p = tmp("lf");
+        write_text_file(p.to_string_lossy().into(), "a\nb".into(), "lf".into(), true).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"a\nb\n");
+    }
+
+    #[test]
+    fn write_crlf_restores_carriage_returns() {
+        let p = tmp("crlf");
+        write_text_file(p.to_string_lossy().into(), "a\nb".into(), "crlf".into(), true).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"a\r\nb\r\n");
+    }
+
+    #[test]
+    fn no_final_newline_is_respected() {
+        let p = tmp("nonl");
+        write_text_file(p.to_string_lossy().into(), "a\nb".into(), "lf".into(), false).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"a\nb");
+    }
+
+    #[test]
+    fn read_detects_crlf_and_normalises_to_lf() {
+        let p = tmp("read_crlf");
+        fs::write(&p, b"line1\r\nline2\r\n").unwrap();
+        let tf = read_text_file_at(&p).unwrap();
+        assert_eq!(tf.eol, "crlf");
+        assert!(tf.final_newline);
+        assert!(tf.encoding_ok && !tf.read_only);
+        assert_eq!(tf.content, "line1\nline2\n"); // editor always sees LF
+    }
+
+    /// The safety property: read a file, write it back with its recorded
+    /// eol/final-newline, and the bytes are unchanged on those axes.
+    #[test]
+    fn crlf_round_trip_is_byte_identical() {
+        let p = tmp("roundtrip");
+        let original = b"x\r\ny\r\nz".to_vec(); // CRLF, no trailing newline
+        fs::write(&p, &original).unwrap();
+        let tf = read_text_file_at(&p).unwrap();
+        write_text_file(tf.path.clone(), tf.content, tf.eol, tf.final_newline).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), original);
+    }
+
+    #[test]
+    fn invalid_utf8_is_read_only() {
+        let p = tmp("binary");
+        fs::write(&p, [0xff, 0xfe, 0x00, 0x41]).unwrap();
+        let tf = read_text_file_at(&p).unwrap();
+        assert!(!tf.encoding_ok, "bad UTF-8 should not be encoding_ok");
+        assert!(tf.read_only, "bad UTF-8 must be read-only so a save can't corrupt it");
+    }
 }

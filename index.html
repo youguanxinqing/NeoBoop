@@ -17,9 +17,14 @@
         <input id="rename-input" class="rename-input" type="text"
                placeholder="Tab name" autocomplete="off" spellcheck="false" />
       </div>
+      <div id="confirm-wrap" class="confirm-wrap hidden" tabindex="-1">
+        <p id="confirm-msg" class="confirm-msg"></p>
+        <div id="confirm-buttons" class="confirm-buttons"></div>
+      </div>
       <div id="editor" class="editor"></div>
       <div id="status-bar" class="status-bar idle">
         <span id="status-msg" class="status-msg"></span>
+        <span id="doc-kind" class="doc-kind"></span>
         <select id="lang-select" class="lang-select" title="Syntax highlighting"></select>
       </div>
     </div>

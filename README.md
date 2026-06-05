@@ -30,11 +30,21 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 - **Split panes** — split the focused pane side-by-side or stacked, composing
   arbitrary grids (a recursive split tree, Vim/Zed-style). Each pane is an
   *independent* editor — no shared buffer, no state-swap.
-- **Tabs** — independent editor panes with a single global tab bar; rename any
-  tab; cycle which tab a pane shows.
+- **Tabs** — independent editor panes with a single global tab bar; double-click
+  a scratch tab to name it; cycle which tab a pane shows.
 - **Global quick-capture** — a system-wide hotkey (default <kbd>⌃⌥Space</kbd>,
   rebindable in Preferences) raises NeoBoop and opens a fresh boop from any app,
   so you can jot something the moment it occurs to you.
+- **Open & edit real files** — right-click any file → **Open With ▸ NeoBoop** (or
+  drag it onto the icon) and it loads into a tab named after the file, language
+  picked from its extension. Edits mark the tab with a dirty dot; <kbd>⌘S</kbd>
+  saves in place (preserving the file's original line endings); closing with
+  unsaved changes prompts first. Non-UTF-8 files open read-only so a save can't
+  corrupt them; very large files are skipped.
+- **Scratch that never gets lost** — every scratchpad is autosaved to a managed
+  store and kept forever. Quit and relaunch and your tabs come back; reopen any
+  past scratch from **Scratch History…** in the ⌘B palette. <kbd>⌘S</kbd> on a
+  scratch saves it out as a real file.
 - **Syntax-aware** — auto-detects or locks to 10 languages (JS, JSON, SQL,
   HTML, XML, CSS, Python, YAML, Markdown, plain text), with a one-step
   **Preview Markdown** palette action.
@@ -60,7 +70,9 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 | Shortcut | Action |
 | --- | --- |
 | <kbd>⌘T</kbd> | New tab |
-| <kbd>⌘S</kbd> | Rename the focused tab (session-only — NeoBoop has no files) |
+| <kbd>⌘S</kbd> | Save (real file: in place; scratch: save out as a file) |
+| <kbd>⌘W</kbd> | Close the focused tab (prompts if a file has unsaved changes) |
+| Double-click | Rename a scratch tab |
 | <kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd> | Cycle which tab the focused pane shows |
 
 **Split panes**
@@ -141,9 +153,10 @@ quarantine attribute so the app runs locally on double-click. These wrap
 
 ```
 src/
-  main.ts          # palette UI, shortcuts, status bar, execution wiring
+  main.ts          # palette UI, shortcuts, status bar, save/close/restore wiring
   editor.ts        # EditorPane — one independent CodeMirror instance
-  tabs.ts          # TabManager — reconciles tabs into split-tree leaves
+  tabs.ts          # TabManager — tabs + document model (file / scratch), autosave
+  store.ts         # persistence bridge: files, scratch store + history, session
   split.ts         # recursive split tree (the pane grid)
   picker.ts        # zero-dep fuzzy search (replaces Boop's Fuse)
   languages.ts     # language detection + lazy CodeMirror language loaders
@@ -154,7 +167,7 @@ src/
     registry.ts    # build-time glob loader for builtin/ + lib/
     builtin/*.js    # Boop transformations (vendored, unmodified)
     lib/*.js        # @boop/ libraries (vendored, unmodified)
-src-tauri/         # thin Rust shell — window, native menus, global shortcut
+src-tauri/         # thin Rust shell — window, menus, file I/O, scratch/session store
 ```
 
 ## Acknowledgements

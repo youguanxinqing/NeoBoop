@@ -33,6 +33,19 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "name": "Text Document",
+        "role": "Editor",
+        "ext": [
+          "txt", "text", "log", "md", "markdown", "json", "jsonc", "js", "mjs",
+          "cjs", "ts", "tsx", "jsx", "sql", "html", "htm", "xml", "svg", "plist",
+          "css", "scss", "py", "yml", "yaml", "toml", "ini", "conf", "csv", "tsv",
+          "sh", "bash", "zsh", "env", "rs", "go", "java", "c", "h", "cpp", "rb"
+        ],
+        "contentTypes": ["public.text", "public.source-code", "public.data"]
+      }
     ]
   }
 }

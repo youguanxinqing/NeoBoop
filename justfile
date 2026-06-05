@@ -46,9 +46,12 @@ build:
         done
 
 # 构建并安装到 /Applications（覆盖已有版本）
-install: build
+# 只打 .app（不打 .dmg）：本地安装用不到 dmg，而 dmg 步骤会反复挂载临时卷，
+# 偶尔残留导致 bundle_dmg.sh 失败、连带整个安装中断。要 .dmg 用 `just build`。
+install:
     #!/usr/bin/env bash
     set -euo pipefail
+    pnpm tauri build --bundles app
     target="/Applications/{{app_name}}.app"
     rm -rf "${target}"
     cp -R "{{built_app}}" "${target}"

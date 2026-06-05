@@ -35,6 +35,9 @@
      deliberate selection never blurs into the ambient current-line wash. */
   --selection: color-mix(in srgb, var(--theme) 22%, transparent);
   --selection-focused: color-mix(in srgb, var(--theme) 38%, transparent);
+  /* Search-hit highlight (global search <mark>). Stronger variant for names. */
+  --hit: color-mix(in srgb, var(--theme) 32%, transparent);
+  --hit-strong: color-mix(in srgb, var(--theme) 52%, transparent);
   color-scheme: dark;
 }
 
@@ -67,6 +70,8 @@
     --active-line-gutter: color-mix(in srgb, var(--theme) 30%, transparent);
     --selection: color-mix(in srgb, var(--theme) 26%, transparent);
     --selection-focused: color-mix(in srgb, var(--theme) 42%, transparent);
+    --hit: color-mix(in srgb, var(--theme) 26%, transparent);
+    --hit-strong: color-mix(in srgb, var(--theme) 42%, transparent);
     color-scheme: light;
   }
 }
@@ -173,6 +178,276 @@ body,
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
   /* Driven by ⌘+ / ⌘- zoom (see main.ts); falls back to Boop's 15px default. */
   font-size: var(--editor-font-size, 15px);
+}
+
+/* Keep the line-number gutter a consistent width across panes. CodeMirror sizes
+   each gutter to its own pane's line count, so a 5-line pane stacked under a
+   200-line one would render a narrower gutter and the text columns wouldn't line
+   up. Reserve room for ~3 digits (covers files up to 999 lines); larger files
+   still grow it as usual. */
+.editor .cm-lineNumbers .cm-gutterElement {
+  min-width: 2.3em;
+  box-sizing: border-box;
+}
+
+/* ---- find / replace panel (⌘F) ----
+   Restyle CodeMirror's default search panel to read like the rest of the app:
+   a clean macOS toolbar in the picker surface, sage-tinted focus + buttons. */
+.cm-panels {
+  background: var(--picker-bg);
+  color: var(--fg);
+  border: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.cm-panels.cm-panels-top {
+  border-bottom: 1px solid var(--border);
+}
+.cm-panel.cm-search {
+  position: relative;
+  padding: 9px 34px 9px 12px;
+  font-size: 12px;
+}
+.cm-panel.cm-search label {
+  font-size: 11px;
+  color: var(--tab-fg);
+  margin: 0 3px 0 6px;
+  user-select: none;
+}
+.cm-panel.cm-search input[type="checkbox"] {
+  accent-color: var(--theme);
+  margin: 0 3px 0 0;
+  vertical-align: -1px;
+}
+.cm-textfield {
+  font-size: 12px;
+  padding: 3px 8px;
+  margin: 0 4px 0 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+}
+.cm-textfield:focus {
+  border-color: var(--theme);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme) 28%, transparent);
+}
+.cm-textfield[name="replace"] {
+  margin-top: 7px;
+}
+.cm-button {
+  font-size: 11px;
+  padding: 3px 10px;
+  margin: 0 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--tab-hover-bg);
+  background-image: none;
+  color: var(--fg);
+  cursor: default;
+}
+.cm-button:hover {
+  background-color: var(--tab-active-bg);
+}
+.cm-button:active {
+  background-color: var(--theme);
+  border-color: var(--theme);
+  color: #fff;
+}
+.cm-panel.cm-search [name="close"] {
+  position: absolute;
+  top: 7px;
+  right: 9px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tab-fg);
+  font-size: 14px;
+  line-height: 1;
+}
+.cm-panel.cm-search [name="close"]:hover {
+  background: var(--tab-hover-bg);
+  color: var(--fg);
+}
+
+/* ---- global cross-tab search (⌃X ⌃F) ----
+   A ⌘B-style overlay that searches every open tab's name + content. Each row is
+   a tab with hits: name (matched chars marked) + kind badge + count, then a
+   content snippet with the query highlighted. See mockups/global-search.html. */
+.gsearch-wrap {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, 92vw);
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  overflow: hidden;
+}
+.gsearch-wrap.hidden {
+  display: none;
+}
+.gs-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.gs-magnifier {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  opacity: 0.55;
+}
+.gs-input {
+  flex: 1 1 auto;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 15px;
+  font-family: inherit;
+}
+.gs-input::placeholder {
+  color: var(--tab-fg);
+}
+.gs-summary {
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--tab-fg);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tab-hover-bg) 40%, transparent);
+}
+.gs-summary b {
+  color: var(--fg);
+  font-weight: 600;
+}
+.gs-list {
+  list-style: none;
+  margin: 0;
+  padding: 5px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.gs-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  cursor: default;
+}
+.gs-item:hover {
+  background: var(--tab-hover-bg);
+}
+.gs-item.active {
+  background: var(--accent);
+}
+.gs-row1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.gs-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gs-badge {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.gs-badge.scratch {
+  background: color-mix(in srgb, var(--theme) 24%, transparent);
+  color: var(--fg);
+}
+.gs-badge.file {
+  background: #8a8f99;
+  color: #fff;
+}
+.gs-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--tab-fg);
+  font-variant-numeric: tabular-nums;
+}
+.gs-snippet {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--tab-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gs-line {
+  opacity: 0.7;
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.gs-empty {
+  font-style: italic;
+  opacity: 0.7;
+}
+.gs-item mark {
+  background: var(--hit);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.gs-name mark {
+  background: var(--hit-strong);
+}
+/* keep everything legible on the selected (sage) row */
+.gs-item.active,
+.gs-item.active .gs-name,
+.gs-item.active .gs-count,
+.gs-item.active .gs-snippet,
+.gs-item.active .gs-line {
+  color: #fff;
+}
+.gs-item.active mark {
+  background: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.gs-item.active .gs-badge.scratch {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.gs-footer {
+  display: flex;
+  gap: 14px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--tab-fg);
+}
+.gs-key {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--tab-fg);
+  background: var(--tab-hover-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-right: 3px;
 }
 
 /* ---- split layout (see split.ts) ---- */

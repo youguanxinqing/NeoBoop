@@ -21,6 +21,24 @@
         <p id="confirm-msg" class="confirm-msg"></p>
         <div id="confirm-buttons" class="confirm-buttons"></div>
       </div>
+      <div id="gsearch-wrap" class="gsearch-wrap hidden">
+        <div class="gs-input-row">
+          <svg class="gs-magnifier" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="7" cy="7" r="4.5" />
+            <line x1="10.5" y1="10.5" x2="14" y2="14" stroke-linecap="round" />
+          </svg>
+          <input id="gsearch-input" class="gs-input" type="text"
+                 placeholder="Search all tabs — names & contents…"
+                 autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="gsearch-summary" class="gs-summary"></div>
+        <ul id="gsearch-list" class="gs-list"></ul>
+        <div class="gs-footer">
+          <span><span class="gs-key">↑</span><span class="gs-key">↓</span> navigate</span>
+          <span><span class="gs-key">↵</span> open</span>
+          <span><span class="gs-key">esc</span> close</span>
+        </div>
+      </div>
       <div id="editor" class="editor"></div>
       <div id="status-bar" class="status-bar idle">
         <span id="status-msg" class="status-msg"></span>

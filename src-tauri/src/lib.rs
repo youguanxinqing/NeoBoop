@@ -263,18 +263,20 @@ pub fn run() {
             // View submenu carries the split commands; selecting one emits an
             // event the frontend turns into a SplitTree mutation. Directional
             // wording ("Split Right/Down") dodges the vertical/horizontal trap.
-            // Ctrl+S = 竖屏 (side-by-side, vertical divider); Ctrl+V = 横屏
-            // (stacked, horizontal divider) — the user's chosen mnemonics.
+            //
+            // No accelerators here on purpose: the keyboard chords (⌃S side-by-
+            // side, ⌃V stacked, ⌃X close pane) are handled in the frontend's
+            // capture-phase keydown instead. A native Control accelerator raced
+            // with CodeMirror's emacs bindings (⌃V = page-down), so the key both
+            // scrolled and split. These items stay clickable; the shortcut hints
+            // live in the README + the boot status line.
             let split_right = MenuItemBuilder::with_id("split-right", "Split Right")
-                .accelerator("Control+S")
                 .build(handle)?;
             let split_down = MenuItemBuilder::with_id("split-down", "Split Down")
-                .accelerator("Control+V")
                 .build(handle)?;
-            // Ctrl+X closes the focused pane but keeps its tab (parked, still
-            // in the tab bar). Closing a tab outright is ⌘W (macOS standard).
+            // Closing the focused pane keeps its tab (parked, still in the tab
+            // bar). Closing a tab outright is ⌘W (macOS standard).
             let close_pane = MenuItemBuilder::with_id("close-pane", "Close Pane")
-                .accelerator("Control+X")
                 .build(handle)?;
             let view_menu = SubmenuBuilder::new(handle, "View")
                 .item(&split_right)

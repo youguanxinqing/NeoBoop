@@ -18,6 +18,7 @@ import {
   takeOpenedFiles,
   type ScratchMeta,
 } from "./store";
+import { searchDocuments, type GlobalResult } from "./gsearch";
 
 const tabBarEl = document.getElementById("tab-bar")!;
 const editorEl = document.getElementById("editor")!;
@@ -33,6 +34,10 @@ const renameInput = document.getElementById("rename-input") as HTMLInputElement;
 const confirmWrap = document.getElementById("confirm-wrap")!;
 const confirmMsg = document.getElementById("confirm-msg")!;
 const confirmButtons = document.getElementById("confirm-buttons")!;
+const gsearchWrap = document.getElementById("gsearch-wrap")!;
+const gsearchInput = document.getElementById("gsearch-input") as HTMLInputElement;
+const gsearchSummary = document.getElementById("gsearch-summary")!;
+const gsearchList = document.getElementById("gsearch-list")!;
 
 // ---- theme: follow the OS -------------------------------------------------
 
@@ -529,6 +534,103 @@ confirmWrap.addEventListener("keydown", (e) => {
   }
 });
 
+// ---- global cross-tab search (⌃X ⌃F) --------------------------------------
+// A ⌘B-style overlay that searches every open tab's name + content at once
+// (triggered by the Emacs-style ⌃X prefix → ⌃F; see the capture-phase handler).
+// Each result is a tab with hits — name (matched chars marked) + kind badge +
+// count, then a content snippet with the query highlighted. Selecting jumps to
+// that tab and selects its first hit. titleHtml/snippetHtml are pre-escaped by
+// gsearch.ts (only <mark> survives), so injecting them as innerHTML is safe.
+
+let gsResults: GlobalResult[] = [];
+let gsActive = 0;
+
+function openGlobalSearch(): void {
+  gsearchWrap.classList.remove("hidden");
+  gsearchInput.value = "";
+  gsActive = 0;
+  renderGlobalSearch();
+  gsearchInput.focus();
+}
+
+function closeGlobalSearch(): void {
+  gsearchWrap.classList.add("hidden");
+  tabs.focused.focus();
+}
+
+function renderGlobalSearch(): void {
+  const query = gsearchInput.value.trim();
+  gsResults = searchDocuments(tabs.documentsForSearch(), query);
+  if (gsActive >= gsResults.length) gsActive = Math.max(0, gsResults.length - 1);
+
+  if (!query) {
+    gsearchSummary.textContent = "Type to search open tabs — names & contents";
+  } else if (gsResults.length === 0) {
+    gsearchSummary.textContent = "No matches";
+  } else {
+    const total = gsResults.reduce((n, r) => n + r.count, 0);
+    gsearchSummary.innerHTML =
+      `<b>${total}</b> ${total === 1 ? "match" : "matches"} in ` +
+      `<b>${gsResults.length}</b> ${gsResults.length === 1 ? "tab" : "tabs"}`;
+  }
+
+  gsearchList.innerHTML = "";
+  gsResults.forEach((r, i) => {
+    const li = document.createElement("li");
+    li.className = "gs-item" + (i === gsActive ? " active" : "");
+    const lineRef = r.line != null ? `<span class="gs-line">L${r.line}</span>` : "";
+    const countLabel = `${r.count} ${r.count === 1 ? "match" : "matches"}`;
+    li.innerHTML =
+      `<div class="gs-row1">` +
+      `<span class="gs-name">${r.titleHtml}</span>` +
+      `<span class="gs-badge ${r.kind}">${r.kind}</span>` +
+      `<span class="gs-count">${countLabel}</span>` +
+      `</div>` +
+      `<div class="gs-snippet">${lineRef}${r.snippetHtml}</div>`;
+    li.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      chooseGlobalSearch(i);
+    });
+    gsearchList.appendChild(li);
+  });
+  gsearchList.querySelector(".gs-item.active")?.scrollIntoView({ block: "nearest" });
+}
+
+function chooseGlobalSearch(i: number): void {
+  const r = gsResults[i];
+  closeGlobalSearch();
+  if (!r) return;
+  tabs.revealMatch(r.id, r.from, r.to);
+  syncStatus();
+}
+
+gsearchInput.addEventListener("input", () => {
+  gsActive = 0;
+  renderGlobalSearch();
+});
+
+gsearchInput.addEventListener("keydown", (e) => {
+  const key = e.key.toLowerCase();
+  const down = e.key === "ArrowDown" || (e.ctrlKey && key === "n");
+  const up = e.key === "ArrowUp" || (e.ctrlKey && key === "p");
+  const n = gsResults.length;
+  if (down) {
+    e.preventDefault();
+    if (n > 0) gsActive = (gsActive + 1) % n;
+    renderGlobalSearch();
+  } else if (up) {
+    e.preventDefault();
+    if (n > 0) gsActive = (gsActive - 1 + n) % n;
+    renderGlobalSearch();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    chooseGlobalSearch(gsActive);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeGlobalSearch();
+  }
+});
+
 // ---- editor font zoom (⌘+ / ⌘- / ⌘0) --------------------------------------
 // App-wide zoom, the macOS way: one font size shared by every tab (and every
 // window, via localStorage), not a per-editor setting. Driven through the
@@ -645,32 +747,101 @@ window.addEventListener("keydown", (e) => {
     tabs.switchBy(-1);
     return;
   }
-  // Ctrl-S (竖屏 / side-by-side) and Ctrl-V (横屏 / stacked) are handled by the
-  // native View-menu accelerators, which emit "split-right" / "split-down" —
-  // see the listeners above. Same pattern as Settings (⌘,); no JS handler.
-
+  // Ctrl-S/Ctrl-V (split) and Ctrl-X (close pane) are Ctrl chords — handled in
+  // the capture-phase listener below, not here (this handler only sees ⌘).
 });
 
-// Ctrl-H/J/K/L : move focus to the neighbouring pane, Vim-style
-// (h ← / j ↓ / k ↑ / l →). Handled in the capture phase so it beats
-// CodeMirror's mac emacs bindings (Ctrl-H deletes a char, Ctrl-K kills to
-// end of line). We only swallow the key when focus actually moves — i.e.
-// there IS a pane that way — otherwise we let it fall through so single-pane
-// editing keeps Ctrl-H / Ctrl-K.
+// Pane control via Ctrl chords, handled in the CAPTURE phase so they beat
+// CodeMirror's mac emacs bindings before the editor sees them. (They are NOT
+// native menu accelerators: a native Control accelerator raced with CodeMirror
+// — e.g. ⌃V is emacs cursorPageDown, so it both scrolled and split.)
+//
+//   ⌃S split side-by-side · ⌃V split stacked
+//   ⌃H/J/K/L move focus between panes, Vim-style (← ↓ ↑ →)
+//   ⌃X is an Emacs-style PREFIX:  ⌃X ⌃F search all tabs · ⌃X 0 close pane
+//
+// The split chords always swallow the key; H/J/K/L only swallows when focus
+// actually moves, so single-pane editing keeps CodeMirror's ⌃H (delete char) /
+// ⌃K (kill line).
 const PANE_DIRS: Record<string, Direction> = {
   h: "left",
   j: "down",
   k: "up",
   l: "right",
 };
+
+// ⌃X prefix: after ⌃X we wait briefly for the second key (⌃F or 0). ⌃X itself
+// no longer closes the pane — that moved to ⌃X 0 (Emacs delete-window) so ⌃X
+// can serve as a prefix without the close-pane action lagging behind a timeout.
+let ctrlXPending = false;
+let ctrlXTimer: number | undefined;
+function endCtrlXPrefix(): void {
+  ctrlXPending = false;
+  if (ctrlXTimer) clearTimeout(ctrlXTimer);
+  ctrlXTimer = undefined;
+}
+function beginCtrlXPrefix(): void {
+  ctrlXPending = true;
+  setStatus("⌃X-   ⌃F search all tabs · 0 close pane", "info");
+  if (ctrlXTimer) clearTimeout(ctrlXTimer);
+  ctrlXTimer = window.setTimeout(() => {
+    endCtrlXPrefix();
+    setStatus("", "idle");
+  }, 1800);
+}
+
 window.addEventListener(
   "keydown",
   (e) => {
-    if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-    // Don't steal keys while an overlay (palette / rename) is open.
+    // Overlays own the keyboard while open.
     if (!pickerWrap.classList.contains("hidden")) return;
     if (!renameWrap.classList.contains("hidden")) return;
-    const dir = PANE_DIRS[e.key.toLowerCase()];
+    if (!confirmWrap.classList.contains("hidden")) return;
+    if (!gsearchWrap.classList.contains("hidden")) return;
+
+    const key = e.key.toLowerCase();
+
+    // ⌃X prefix continuation.
+    if (ctrlXPending) {
+      // Keep waiting through the bare modifier keydowns themselves.
+      if (key === "control" || key === "shift" || key === "alt" || key === "meta") return;
+      if (e.ctrlKey && key === "f" && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        endCtrlXPrefix();
+        setStatus("", "idle");
+        openGlobalSearch();
+        return;
+      }
+      if (key === "0" && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        endCtrlXPrefix();
+        setStatus("", "idle");
+        tabs.closePane();
+        return;
+      }
+      // Any other key abandons the prefix and is handled normally below.
+      endCtrlXPrefix();
+      setStatus("", "idle");
+    }
+
+    if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+
+    if (key === "x") {
+      e.preventDefault();
+      e.stopPropagation();
+      beginCtrlXPrefix();
+      return;
+    }
+    const split = key === "s" ? "row" : key === "v" ? "column" : null;
+    if (split) {
+      e.preventDefault();
+      e.stopPropagation();
+      tabs.splitPane(split);
+      return;
+    }
+    const dir = PANE_DIRS[key];
     if (!dir) return;
     if (tabs.focusDir(dir)) {
       e.preventDefault();

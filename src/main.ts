@@ -686,9 +686,9 @@ window.addEventListener("storage", (e) => {
 });
 
 // ---- global shortcuts -----------------------------------------------------
-// These are ⌘ (Cmd) shortcuts only. Ctrl is reserved for the native View-menu
-// accelerators — ⌃S/⌃V split, ⌃X close pane — so we deliberately do NOT treat
-// Ctrl as a Cmd alias here; otherwise ⌃S would fire both rename and split.
+// These are ⌘ (Cmd) shortcuts only. Ctrl is reserved for the pane chords —
+// ⌃W split prefix, ⌃X pane prefix, ⌃HJKL focus — so we deliberately do NOT
+// treat Ctrl as a Cmd alias here; otherwise those would double-fire.
 // Note: Settings (⌘,) is handled by the native menu accelerator (emits
 // "open-settings") — no JS handler needed here.
 
@@ -775,20 +775,20 @@ window.addEventListener("keydown", (e) => {
     tabs.switchBy(-1);
     return;
   }
-  // Ctrl-S/Ctrl-V (split) and Ctrl-X (close pane) are Ctrl chords — handled in
-  // the capture-phase listener below, not here (this handler only sees ⌘).
+  // ⌃W (split) and ⌃X (pane prefix) are Ctrl chords — handled in the
+  // capture-phase listener below, not here (this handler only sees ⌘).
 });
 
 // Pane control via Ctrl chords, handled in the CAPTURE phase so they beat
-// CodeMirror's mac emacs bindings before the editor sees them. (They are NOT
-// native menu accelerators: a native Control accelerator raced with CodeMirror
-// — e.g. ⌃V is emacs cursorPageDown, so it both scrolled and split.)
+// CodeMirror's mac emacs bindings before the editor sees them — e.g. ⌃W is
+// emacs kill-region, so without intercepting it the editor would also cut.
 //
-//   ⌃S split side-by-side · ⌃V split stacked
+//   ⌃W is a Vim-style window PREFIX:  ⌃W s split side-by-side · ⌃W v split
+//     stacked · ⌃W +/− grow/shrink the focused pane along its split's axis
 //   ⌃H/J/K/L move focus between panes, Vim-style (← ↓ ↑ →)
 //   ⌃X is an Emacs-style PREFIX:  ⌃X ⌃F search all tabs · ⌃X 0 close pane
 //
-// The split chords always swallow the key; H/J/K/L only swallows when focus
+// The ⌃W/⌃X prefixes always swallow their keys; H/J/K/L only swallows when focus
 // actually moves, so single-pane editing keeps CodeMirror's ⌃H (delete char) /
 // ⌃K (kill line).
 const PANE_DIRS: Record<string, Direction> = {
@@ -814,6 +814,24 @@ function beginCtrlXPrefix(): void {
   if (ctrlXTimer) clearTimeout(ctrlXTimer);
   ctrlXTimer = window.setTimeout(() => {
     endCtrlXPrefix();
+    setStatus("", "idle");
+  }, 1800);
+}
+
+// ⌃W prefix (Vim window commands): after ⌃W we wait briefly for s / v to split.
+let ctrlWPending = false;
+let ctrlWTimer: number | undefined;
+function endCtrlWPrefix(): void {
+  ctrlWPending = false;
+  if (ctrlWTimer) clearTimeout(ctrlWTimer);
+  ctrlWTimer = undefined;
+}
+function beginCtrlWPrefix(): void {
+  ctrlWPending = true;
+  setStatus("⌃W-   s/v split · +/− grow/shrink pane", "info");
+  if (ctrlWTimer) clearTimeout(ctrlWTimer);
+  ctrlWTimer = window.setTimeout(() => {
+    endCtrlWPrefix();
     setStatus("", "idle");
   }, 1800);
 }
@@ -854,6 +872,33 @@ window.addEventListener(
       setStatus("", "idle");
     }
 
+    // ⌃W prefix continuation (ctrl may be held or released for the second key).
+    if (ctrlWPending) {
+      if (key === "control" || key === "shift" || key === "alt" || key === "meta") return;
+      // s / v split — one-shot, ends the prefix.
+      if ((key === "s" || key === "v") && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        endCtrlWPrefix();
+        setStatus("", "idle");
+        tabs.splitPane(key === "s" ? "row" : "column");
+        return;
+      }
+      // + / − resize the focused pane along its split's axis (width if the split
+      // is side-by-side, height if stacked). Accepts = and _ as the unshifted
+      // keys. Re-arms the prefix so +/− can be tapped repeatedly to keep nudging.
+      if ((e.key === "+" || e.key === "=" || e.key === "-" || e.key === "_") && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        tabs.resizePane(e.key === "+" || e.key === "=");
+        beginCtrlWPrefix();
+        return;
+      }
+      // Any other key abandons the prefix and is handled normally below.
+      endCtrlWPrefix();
+      setStatus("", "idle");
+    }
+
     if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
 
     if (key === "x") {
@@ -862,11 +907,10 @@ window.addEventListener(
       beginCtrlXPrefix();
       return;
     }
-    const split = key === "s" ? "row" : key === "v" ? "column" : null;
-    if (split) {
+    if (key === "w") {
       e.preventDefault();
       e.stopPropagation();
-      tabs.splitPane(split);
+      beginCtrlWPrefix();
       return;
     }
     const dir = PANE_DIRS[key];
@@ -936,7 +980,7 @@ void (async () => {
   const extra = allScripts.length - builtinScripts.length;
   const suffix = extra > 0 ? ` (+${extra} custom)` : "";
   setStatus(
-    `${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘S save · ⌘T tab · ⌃S/⌃V split`,
+    `${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘S save · ⌘T tab · ⌃W s/v split`,
     "info",
   );
   // Pick up any file the app was cold-launched with (Finder "Open With…").

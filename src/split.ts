@@ -198,6 +198,52 @@ export class SplitTree {
     this.applySizes(parent);
   }
 
+  /** Grow (or shrink) the focused pane within its IMMEDIATE parent branch. The
+   *  parent's axis decides the dimension — a "row" branch resizes width, a
+   *  "column" branch resizes height — so the same key adapts to how the focused
+   *  pane is split and which split it sits in. Weight is taken from / given to
+   *  the siblings proportionally, never shrinking any pane below MIN_PANE_PX.
+   *  No-op for the lone root leaf (nothing to resize against). */
+  resizeFocused(grow: boolean): void {
+    const parent = this.focused.parent;
+    if (!parent) return;
+    const horizontal = parent.axis === "row";
+    const n = parent.children.length;
+    const rect = parent.el.getBoundingClientRect();
+    const flexSpace = (horizontal ? rect.width : rect.height) - DIVIDER_PX * (n - 1);
+    if (flexSpace <= 0) return;
+
+    // Work in pixels, then write the result back as flex-grow ratios (only their
+    // relative magnitude matters, so px values serve directly).
+    const total = parent.sizes.reduce((s, x) => s + x, 0);
+    const px = parent.sizes.map((s) => (s / total) * flexSpace);
+    const i = parent.children.indexOf(this.focused);
+    const others = px.reduce((s, p, idx) => (idx === i ? s : s + p), 0);
+    // One step ≈ 7% of the branch, but always at least 28px so it feels responsive.
+    const step = Math.max(28, flexSpace * 0.07);
+
+    if (grow) {
+      // Pull from the siblings proportionally, but stop before any hits the min.
+      const room = others - (n - 1) * MIN_PANE_PX;
+      const take = Math.min(step, room);
+      if (take <= 0) return; // siblings already minimal — can't grow further
+      px[i] += take;
+      for (let k = 0; k < n; k++) if (k !== i) px[k] -= take * (px[k] / others);
+    } else {
+      // Give to the siblings proportionally, keeping the focused pane above min.
+      const give = Math.min(step, px[i] - MIN_PANE_PX);
+      if (give <= 0) return; // already at the minimum — can't shrink further
+      px[i] -= give;
+      for (let k = 0; k < n; k++) {
+        if (k !== i) px[k] += give * (others > 0 ? px[k] / others : 1 / (n - 1));
+      }
+    }
+
+    parent.sizes = px;
+    this.applySizes(parent);
+    this.onLayoutChange?.(); // editors changed size — let the host re-measure.
+  }
+
   private removeLeaf(leaf: Leaf): boolean {
     const parent = leaf.parent;
     if (!parent) return false; // the lone root leaf — nothing to collapse.

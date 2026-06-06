@@ -79,9 +79,11 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 
 | Shortcut | Action |
 | --- | --- |
-| <kbd>⌃S</kbd> | Split side-by-side (vertical divider) |
-| <kbd>⌃V</kbd> | Split stacked (horizontal divider) |
-| <kbd>⌃X</kbd> | Close the focused pane (keeps its tab) |
+| <kbd>⌃W</kbd> <kbd>S</kbd> | Split side-by-side (vertical divider) |
+| <kbd>⌃W</kbd> <kbd>V</kbd> | Split stacked (horizontal divider) |
+| <kbd>⌃W</kbd> <kbd>+</kbd> / <kbd>−</kbd> | Grow / shrink the focused pane (width or height, per its split) |
+| <kbd>⌃X</kbd> <kbd>0</kbd> | Close the focused pane (keeps its tab) |
+| <kbd>⌃X</kbd> <kbd>⌃F</kbd> | Search across all tabs |
 | <kbd>⌃H</kbd> <kbd>⌃J</kbd> <kbd>⌃K</kbd> <kbd>⌃L</kbd> | Move focus between panes, Vim-style (← ↓ ↑ →) |
 
 **View & system**

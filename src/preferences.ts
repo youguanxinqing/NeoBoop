@@ -6,6 +6,7 @@
 import "./styles.css";
 import { emit } from "@tauri-apps/api/event";
 import { clearUserDir, getUserDir, pickUserDir } from "./scripts/userscripts";
+import { DEFAULT_COLORS, getPaletteColors, MAX_COLORS, setPaletteColors } from "./palette";
 import {
   DEFAULT_GLOBAL_SHORTCUT,
   accelFromEvent,
@@ -38,6 +39,62 @@ clearBtn.addEventListener("click", async () => {
   refresh();
   await emit("scripts-folder-changed");
 });
+
+// ---- highlight colour palette ----------------------------------------------
+
+// Up to MAX_COLORS preset colours, editable as native colour wells. Changes are
+// persisted immediately to localStorage; the main window reads the latest set
+// when it assigns a highlight, so no cross-window event is needed.
+const colorList = document.getElementById("prefs-colors") as HTMLElement;
+const colorAdd = document.getElementById("prefs-color-add") as HTMLButtonElement;
+
+function renderColors(): void {
+  const colors = getPaletteColors();
+  colorList.replaceChildren();
+  colors.forEach((hex, i) => {
+    const slot = document.createElement("div");
+    slot.className = "prefs-color";
+
+    const well = document.createElement("input");
+    well.type = "color";
+    well.className = "prefs-color-well";
+    well.value = hex;
+    well.addEventListener("input", () => {
+      const next = getPaletteColors();
+      next[i] = well.value;
+      setPaletteColors(next);
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "prefs-color-remove";
+    remove.textContent = "✕";
+    remove.title = "Remove colour";
+    remove.disabled = colors.length <= 1; // keep at least one preset
+    remove.addEventListener("click", () => {
+      const next = getPaletteColors();
+      next.splice(i, 1);
+      setPaletteColors(next);
+      renderColors();
+    });
+
+    slot.append(well, remove);
+    colorList.appendChild(slot);
+  });
+  colorAdd.disabled = colors.length >= MAX_COLORS;
+}
+
+colorAdd.addEventListener("click", () => {
+  const colors = getPaletteColors();
+  if (colors.length >= MAX_COLORS) return;
+  // Seed the new well with the next default not already present, else a neutral.
+  const next = DEFAULT_COLORS.find((c) => !colors.includes(c)) ?? "#cccccc";
+  colors.push(next);
+  setPaletteColors(colors);
+  renderColors();
+});
+
+renderColors();
 
 // ---- global quick-capture shortcut ----------------------------------------
 

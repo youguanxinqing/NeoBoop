@@ -440,6 +440,13 @@ export class TabManager {
     return this.split.navigate(dir);
   }
 
+  /** Grow (true) or shrink (false) the focused pane within its enclosing split —
+   *  width when it's side-by-side, height when it's stacked. No-op unless split.
+   *  Split geometry isn't part of the persisted session, so nothing to write. */
+  resizePane(grow: boolean): void {
+    this.split.resizeFocused(grow);
+  }
+
   // ---- tab switcher (⌘B → Select Pane) ------------------------------------
 
   /** Snapshot of all tabs for the switcher picker. */

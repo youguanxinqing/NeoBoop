@@ -180,6 +180,55 @@ body,
   font-size: var(--editor-font-size, 15px);
 }
 
+/* "Interesting words" highlight marks (see highlight.ts). The background wash is
+   set inline (a translucent version of the user's chosen colour); this rule only
+   carries the shape — rounded so multi-token matches read as one pill, with
+   box-decoration-break cloning the rounding onto each line fragment on wrap. */
+.cm-iw {
+  border-radius: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* Custom editor right-click menu (see context-menu.ts). Floats above everything
+   (position:fixed on <body>); styled like the command palette so it reads as
+   part of the app. Replaces the native WKWebView menu within the editor. */
+.ctxmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 184px;
+  padding: 5px;
+  background: var(--picker-bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34);
+  font-size: 13px;
+  user-select: none;
+}
+.ctxmenu.hidden { display: none; }
+.ctxmenu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 5px 9px;
+  border-radius: 5px;
+  color: var(--fg);
+  cursor: default;
+}
+.ctxmenu-item:hover:not(.disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.ctxmenu-item.disabled { opacity: 0.38; }
+.ctxmenu-key { font-size: 11px; opacity: 0.6; }
+.ctxmenu-item:hover:not(.disabled) .ctxmenu-key { opacity: 0.85; }
+.ctxmenu-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border);
+}
+
 /* Keep the line-number gutter a consistent width across panes. CodeMirror sizes
    each gutter to its own pane's line count, so a 5-line pane stacked under a
    200-line one would render a narrower gutter and the text columns wouldn't line
@@ -843,6 +892,9 @@ body.split-dragging-column * {
 }
 .prefs-body {
   padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
 }
 .prefs-section {
   display: flex;
@@ -915,3 +967,46 @@ body.split-dragging-column * {
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
   font-size: 10.5px;
 }
+
+/* Highlight-colour palette editor (Preferences). */
+.prefs-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.prefs-color {
+  position: relative;
+  width: 22px;
+  height: 22px;
+}
+.prefs-color-well {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  cursor: pointer;
+}
+.prefs-color-well::-webkit-color-swatch-wrapper { padding: 2px; }
+.prefs-color-well::-webkit-color-swatch { border: none; border-radius: 3px; }
+.prefs-color-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--picker-bg);
+  color: var(--fg);
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.prefs-color:hover .prefs-color-remove { opacity: 0.85; }
+.prefs-color-remove:hover { opacity: 1; }
+.prefs-color-remove:disabled { display: none; }

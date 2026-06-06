@@ -8,8 +8,8 @@
 
 Paste some text, run a *boop* over it, get the result. Base64, JSON, hashes,
 case conversions, URL encode, and 70+ more — all driven from a single fuzzy
-command palette. Now with split panes, tabs, and a system-wide quick-capture
-hotkey.
+command palette. Now with split panes, tabs, multi-colour highlighting, a
+`boop` terminal command, and a system-wide quick-capture hotkey.
 
 Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 [Boop](https://github.com/IvanMathy/Boop) that has since grown well past it.
@@ -41,17 +41,28 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
   saves in place (preserving the file's original line endings); closing with
   unsaved changes prompts first. Non-UTF-8 files open read-only so a save can't
   corrupt them; very large files are skipped.
+- **`boop` command line** — ⌘B → **Install 'boop' Command in PATH** drops a
+  `boop` shim on your `PATH`; then `boop file.txt` from any terminal opens the
+  file in NeoBoop — a new tab if it's already running, otherwise it launches
+  first. Built on macOS's native open-file event, so it just forwards.
+- **Multi-colour highlighting** — right-click a word (or selection) →
+  **Highlight** colours every occurrence; the app picks a random unused colour
+  from a palette you configure in Preferences (up to 6). **Remove Highlight** /
+  **Clear All Highlights** undo it, also on <kbd>⌘⇧H</kbd> / <kbd>⌘⇧K</kbd>.
+  Only the visible viewport is decorated, so it stays fast even when a common
+  word matches thousands of times in a huge file.
 - **Scratch that never gets lost** — every scratchpad is autosaved to a managed
   store and kept forever. Quit and relaunch and your tabs come back; reopen any
   past scratch from **Scratch History…** in the ⌘B palette. <kbd>⌘S</kbd> on a
   scratch saves it out as a real file.
-- **Syntax-aware** — auto-detects or locks to 10 languages (JS, JSON, SQL,
-  HTML, XML, CSS, Python, YAML, Markdown, plain text), with a one-step
-  **Preview Markdown** palette action.
+- **Syntax-aware** — auto-detects or locks to 13 languages (JS, JSON, SQL,
+  HTML, XML, CSS, Python, YAML, Markdown, Lua, Emacs Lisp, Shell, plain text);
+  the mode is auto-set from a file's extension on open/save, and large files
+  render as plain text to stay fast. One-step **Preview Markdown** palette action.
 - **Native macOS feel** — native menus, follows the system light/dark theme,
   the red button hides (not quits — see below), and a sage colour theme that's
   driven by a single CSS token.
-- **Tiny** — the bundled `.app` is ~3.4 MB; no Apple developer account needed
+- **Tiny** — the bundled `.app` is ~3.7 MB; no Apple developer account needed
   to build and run locally.
 
 ## Keyboard shortcuts
@@ -60,7 +71,7 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 
 | Shortcut | Action |
 | --- | --- |
-| <kbd>⌘B</kbd> | Open the palette — run a boop, or pick an action (Select Pane, Preview Markdown, Settings) |
+| <kbd>⌘B</kbd> | Open the palette — run a boop, or pick an action (Select Pane, Preview Markdown, Highlight Selection, Install `boop` command, Settings) |
 | <kbd>⌘P</kbd> | Jump straight into **Select Pane** (the tab switcher) |
 | <kbd>⌃N</kbd> / <kbd>⌃P</kbd> / <kbd>↑</kbd> <kbd>↓</kbd> | Move the selection (in the palette) |
 | <kbd>↵</kbd> / <kbd>Esc</kbd> | Run the highlighted entry / close the palette |
@@ -74,6 +85,14 @@ Built on **Tauri 2** + **CodeMirror 6**. A from-scratch reimplementation of
 | <kbd>⌘W</kbd> | Close the focused tab (prompts if a file has unsaved changes) |
 | Double-click | Rename a scratch tab |
 | <kbd>⌘⇧]</kbd> / <kbd>⌘⇧[</kbd> | Cycle which tab the focused pane shows |
+
+**Editor**
+
+| Shortcut | Action |
+| --- | --- |
+| <kbd>⌘⇧H</kbd> | Highlight every occurrence of the selection (toggle) |
+| <kbd>⌘⇧K</kbd> | Clear all highlights in the pane |
+| Right-click | Editor menu — Cut / Copy / Paste / Select All + Highlight |
 
 **Split panes**
 
@@ -161,15 +180,19 @@ src/
   store.ts         # persistence bridge: files, scratch store + history, session
   split.ts         # recursive split tree (the pane grid)
   picker.ts        # zero-dep fuzzy search (replaces Boop's Fuse)
-  languages.ts     # language detection + lazy CodeMirror language loaders
-  preferences.ts   # Preferences window (scripts folder, global shortcut)
+  gsearch.ts       # global cross-tab search (⌃X ⌃F)
+  highlight.ts     # multi-colour "interesting words" highlighting (viewport-only)
+  context-menu.ts  # custom editor right-click menu (edit actions + Highlight)
+  palette.ts       # highlight colour palette (configurable in Preferences)
+  languages.ts     # language detection, extension→mode, lazy CM loaders, size guard
+  preferences.ts   # Preferences window (scripts folder, shortcut, highlight colours)
   shortcut.ts      # global quick-capture shortcut: storage + (re)registration
   scripts/
     runtime.ts     # Boop-compatible execution shim
     registry.ts    # build-time glob loader for builtin/ + lib/
     builtin/*.js    # Boop transformations (vendored, unmodified)
     lib/*.js        # @boop/ libraries (vendored, unmodified)
-src-tauri/         # thin Rust shell — window, menus, file I/O, scratch/session store
+src-tauri/         # thin Rust shell — window, menus, file I/O, scratch/session store, `boop` CLI install
 ```
 
 ## Acknowledgements

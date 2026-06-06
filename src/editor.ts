@@ -19,6 +19,10 @@ import {
 } from "./highlight";
 import { editorContextMenu } from "./context-menu";
 
+/** Above this document size (characters), syntax highlighting is disabled and
+ *  the buffer renders as plain text — keeps large files snappy. */
+const MAX_HIGHLIGHT_CHARS = 1_000_000;
+
 /** Theme is reconfigured live (no editor rebuild) so dark/light follows the OS. */
 function themeFor(dark: boolean): Extension {
   return dark ? oneDark : [];
@@ -126,7 +130,17 @@ export class EditorPane {
   }
 
   private async applyEffectiveLanguage(): Promise<void> {
-    const target: LangName = this.modeName === "auto" ? detect(this.fullText) : this.modeName;
+    // Performance guard: above ~1 MB, render as plain text regardless of mode or
+    // extension. Tokenising multi-MB buffers (especially the legacy stream modes
+    // — shell/lua/elisp — which parse line-by-line) is what makes a big file feel
+    // sluggish; a scratchpad must stay snappy. `doc.length` is O(1), so the check
+    // itself costs nothing and we never even materialise the string for big docs.
+    const tooBig = this.view.state.doc.length > MAX_HIGHLIGHT_CHARS;
+    const target: LangName = tooBig
+      ? "text"
+      : this.modeName === "auto"
+        ? detect(this.fullText)
+        : this.modeName;
     if (target === this.appliedLang) return;
     this.appliedLang = target;
     const ext = target === "text" ? [] : await loadLanguage(target);

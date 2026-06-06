@@ -11,11 +11,13 @@ import { getUserDir, loadUserScripts } from "./scripts/userscripts";
 import { LANG_OPTIONS, type LangName } from "./languages";
 import { applyGlobalShortcut, getGlobalShortcut } from "./shortcut";
 import {
+  installCli,
   readManifest,
   readScratchContent,
   readSession,
   readTextFile,
   takeOpenedFiles,
+  uninstallCli,
   type ScratchMeta,
 } from "./store";
 import { searchDocuments, type GlobalResult } from "./gsearch";
@@ -283,6 +285,18 @@ interface PickerSession {
   build: () => PickerEntry[];
 }
 
+/** Run an install/uninstall of the `boop` CLI shim, surfacing the Rust result
+ *  (or a cancelled/failed admin prompt) in the status bar. */
+async function runCliAction(fn: () => Promise<string>, verb: "install" | "uninstall"): Promise<void> {
+  try {
+    const msg = await fn();
+    const hint = verb === "install" ? " Run `boop file.txt` from your terminal." : "";
+    setStatus(msg + hint, "info");
+  } catch (e) {
+    setStatus(`Could not ${verb} the boop command: ${e instanceof Error ? e.message : e}`, "error");
+  }
+}
+
 /** Command-palette session: app actions first, then all scripts. */
 function commandSession(): PickerSession {
   return {
@@ -333,6 +347,20 @@ function commandSession(): PickerSession {
           badge: "action",
           keywords: "settings preferences custom user config directory folder scripts",
           choose: () => void openPreferences(),
+        },
+        {
+          name: "Install 'boop' Command in PATH",
+          description: "Add a `boop` terminal command that opens files in NeoBoop",
+          badge: "action",
+          keywords: "install boop cli command line terminal path shell tool binary open code",
+          choose: () => void runCliAction(installCli, "install"),
+        },
+        {
+          name: "Uninstall 'boop' Command",
+          description: "Remove the `boop` terminal command from PATH",
+          badge: "action",
+          keywords: "uninstall remove boop cli command line terminal path shell tool",
+          choose: () => void runCliAction(uninstallCli, "uninstall"),
         },
       ];
       const scriptCmds: PickerEntry[] = allScripts.map((s) => ({

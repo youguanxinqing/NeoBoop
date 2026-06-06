@@ -4,7 +4,9 @@
 
 use std::fs;
 use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -204,6 +206,105 @@ fn set_global_shortcut<R: Runtime>(app: AppHandle<R>, accelerator: String) -> Re
     gs.register(shortcut).map_err(|e| e.to_string())
 }
 
+// ---- `boop` CLI shim -------------------------------------------------------
+//
+// "Install command in PATH" (VS Code's `code` model) drops a tiny shell shim on
+// PATH that forwards to the GUI:
+//
+//     #!/bin/sh
+//     exec /usr/bin/open -a NeoBoop "$@"
+//
+// `open -a NeoBoop file` is the native macOS launch-or-forward: it starts the
+// app if needed and otherwise sends the file to the running instance as an
+// `odoc` Apple Event — exactly what `RunEvent::Opened` already handles (new
+// tab, or focus an already-open file). Resolving the app by NAME keeps the shim
+// valid wherever NeoBoop.app lives, so app moves/updates don't break it.
+
+/// Standard install location — almost always on PATH (Homebrew owns it on most
+/// dev Macs, so the write often needs no elevation).
+const CLI_DIR: &str = "/usr/local/bin";
+const CLI_NAME: &str = "boop";
+const CLI_SHIM: &str = "#!/bin/sh\nexec /usr/bin/open -a NeoBoop \"$@\"\n";
+
+fn cli_path() -> PathBuf {
+    Path::new(CLI_DIR).join(CLI_NAME)
+}
+
+/// Run a shell command with a native macOS admin prompt (osascript). Used only
+/// when the direct filesystem write is denied.
+fn run_elevated(script: &str) -> Result<(), String> {
+    let escaped = script.replace('\\', "\\\\").replace('"', "\\\"");
+    let osa = format!("do shell script \"{escaped}\" with administrator privileges");
+    let out = Command::new("osascript")
+        .arg("-e")
+        .arg(osa)
+        .output()
+        .map_err(|e| format!("could not run osascript: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    // -128 is "User canceled" from the authentication dialog.
+    if err.contains("-128") {
+        Err("Cancelled.".into())
+    } else {
+        Err(format!("Install failed: {}", err.trim()))
+    }
+}
+
+/// Whether our shim is installed (checks content so we don't claim some other
+/// `boop` on PATH as ours).
+#[tauri::command]
+fn cli_status() -> bool {
+    fs::read_to_string(cli_path())
+        .map(|s| s.contains("open -a NeoBoop"))
+        .unwrap_or(false)
+}
+
+/// Install the `boop` shim. Tries a direct write first (works when CLI_DIR is
+/// user-writable), then falls back to an admin-elevated copy.
+#[tauri::command]
+fn install_cli() -> Result<String, String> {
+    let target = cli_path();
+    if write_shim_direct(&target).is_ok() {
+        return Ok(format!("Installed `{CLI_NAME}` → {}", target.display()));
+    }
+    // Elevated path: stage the shim in a temp file, then copy + chmod as admin.
+    let tmp = std::env::temp_dir().join("neoboop-boop-shim");
+    fs::write(&tmp, CLI_SHIM).map_err(|e| format!("could not stage shim: {e}"))?;
+    let script = format!(
+        "mkdir -p '{dir}' && cp '{tmp}' '{target}' && chmod 755 '{target}'",
+        dir = CLI_DIR,
+        tmp = tmp.display(),
+        target = target.display(),
+    );
+    let res = run_elevated(&script);
+    let _ = fs::remove_file(&tmp);
+    res.map(|()| format!("Installed `{CLI_NAME}` → {} (as admin)", target.display()))
+}
+
+fn write_shim_direct(target: &Path) -> std::io::Result<()> {
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(target, CLI_SHIM)?;
+    fs::set_permissions(target, fs::Permissions::from_mode(0o755))
+}
+
+/// Remove the `boop` shim (direct, then elevated fallback).
+#[tauri::command]
+fn uninstall_cli() -> Result<String, String> {
+    let target = cli_path();
+    if !target.exists() {
+        return Ok(format!("`{CLI_NAME}` is not installed."));
+    }
+    if fs::remove_file(&target).is_ok() {
+        return Ok(format!("Removed `{CLI_NAME}`."));
+    }
+    run_elevated(&format!("rm -f '{}'", target.display()))
+        .map(|()| format!("Removed `{CLI_NAME}` (as admin)."))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -228,7 +329,10 @@ pub fn run() {
             read_text_file,
             write_text_file,
             app_data_read,
-            app_data_write
+            app_data_write,
+            install_cli,
+            uninstall_cli,
+            cli_status
         ])
         // Native menu bar. The app submenu carries a standard "Settings…" (⌘,)
         // item; selecting it emits "open-settings", which the frontend handles

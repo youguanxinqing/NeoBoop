@@ -93,3 +93,9 @@ export const writeScratchContent = (id: number, content: string): Promise<void> 
 
 export const readSession = (): Promise<SessionEntry[]> => readJson(SESSION, []);
 export const writeSession = (entries: SessionEntry[]): Promise<void> => writeJson(SESSION, entries);
+
+// ---- `boop` CLI shim ("Install command in PATH") --------------------------
+
+export const cliStatus = (): Promise<boolean> => invoke("cli_status");
+export const installCli = (): Promise<string> => invoke("install_cli");
+export const uninstallCli = (): Promise<string> => invoke("uninstall_cli");

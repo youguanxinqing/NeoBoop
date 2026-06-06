@@ -16,7 +16,10 @@ export type LangName =
   | "css"
   | "python"
   | "yaml"
-  | "markdown";
+  | "markdown"
+  | "lua"
+  | "elisp"
+  | "shell";
 
 /** Labels shown in the picker, in display order. */
 export const LANG_OPTIONS: { value: LangName; label: string }[] = [
@@ -31,6 +34,9 @@ export const LANG_OPTIONS: { value: LangName; label: string }[] = [
   { value: "python", label: "Python" },
   { value: "yaml", label: "YAML" },
   { value: "markdown", label: "Markdown" },
+  { value: "lua", label: "Lua" },
+  { value: "elisp", label: "Emacs Lisp" },
+  { value: "shell", label: "Shell" },
 ];
 
 const loaders: Record<string, () => Promise<Extension>> = {
@@ -43,6 +49,32 @@ const loaders: Record<string, () => Promise<Extension>> = {
   python: () => import("@codemirror/lang-python").then((m) => m.python()),
   yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
   markdown: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
+  // Lua and Emacs Lisp have no first-party lang-* package; wrap their CodeMirror
+  // 5 "legacy" stream modes as CM6 languages. Emacs Lisp reuses the Common Lisp
+  // mode — close enough for parens/strings/comments/symbol highlighting.
+  lua: async () => {
+    const [{ StreamLanguage }, { lua }] = await Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/lua"),
+    ]);
+    return StreamLanguage.define(lua);
+  },
+  elisp: async () => {
+    const [{ StreamLanguage }, { commonLisp }] = await Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/commonlisp"),
+    ]);
+    return StreamLanguage.define(commonLisp);
+  },
+  // One shell tokenizer covers bash/zsh/fish — legacy-modes has a single `shell`
+  // grammar, not per-shell ones, so we expose it as a single "Shell" mode.
+  shell: async () => {
+    const [{ StreamLanguage }, { shell }] = await Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/shell"),
+    ]);
+    return StreamLanguage.define(shell);
+  },
 };
 
 /** Resolves a concrete language (not "auto"/"text") to its extension. */
@@ -64,6 +96,9 @@ const EXT_LANG: Record<string, LangName> = {
   py: "python",
   yml: "yaml", yaml: "yaml",
   md: "markdown", markdown: "markdown",
+  lua: "lua",
+  el: "elisp",
+  sh: "shell", bash: "shell", zsh: "shell", fish: "shell", ksh: "shell",
 };
 
 /** Pick an editor mode from a file name's extension; "auto" when unknown. */

@@ -47,9 +47,11 @@ project for the full terms:
 
 - **lodash** — <https://github.com/lodash/lodash>
 - **he** — <https://github.com/mathiasbynens/he>
+- **js-yaml** (`js-yaml.js`) — <https://github.com/nodeca/js-yaml> (MIT)
 - **PapaParse** — <https://github.com/mholt/PapaParse>
 - **jsHashes** (`hashes.js`) — <https://github.com/h2non/jshashes>
 - **vkBeautify** — <https://github.com/vkiryukhin/vkBeautify>
+- **js-base64** (`base64.js`, by Dan Kogai) — <https://github.com/dankogai/js-base64> (BSD-3-Clause)
 
 ## Runtime & tooling
 

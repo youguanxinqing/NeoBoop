@@ -124,6 +124,22 @@ fn write_text_file(
     fs::write(&path, body).map_err(|e| e.to_string())
 }
 
+/// Rename a real file on disk (tab rename). Same-directory move only is enforced
+/// by the caller; here we just refuse to clobber an existing target so a careless
+/// rename can't silently destroy another file.
+#[tauri::command]
+fn rename_file(from: String, to: String) -> Result<(), String> {
+    let to_path = Path::new(&to);
+    if to_path.exists() {
+        let name = to_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| to.clone());
+        return Err(format!("“{name}” already exists"));
+    }
+    fs::rename(&from, &to).map_err(|e| e.to_string())
+}
+
 /// Resolve `rel` under the app-data dir, refusing any traversal out of it. This
 /// is the sandbox for NeoBoop's own bookkeeping — the scratch store, its
 /// manifest, and the session file all live here, never user-visible paths.
@@ -328,6 +344,7 @@ pub fn run() {
             take_opened_files,
             read_text_file,
             write_text_file,
+            rename_file,
             app_data_read,
             app_data_write,
             install_cli,

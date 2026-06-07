@@ -77,6 +77,10 @@ export const writeTextFile = (
   finalNewline: boolean,
 ): Promise<void> => invoke("write_text_file", { path, content, eol, finalNewline });
 
+/** Rename a real file on disk (file-tab rename). Rejects if `to` already exists. */
+export const renameFile = (from: string, to: string): Promise<void> =>
+  invoke("rename_file", { from, to });
+
 // ---- scratch store + history ----------------------------------------------
 
 export const readManifest = (): Promise<ScratchMeta[]> => readJson(MANIFEST, []);

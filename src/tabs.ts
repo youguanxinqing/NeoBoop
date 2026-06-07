@@ -24,6 +24,7 @@ import { EditorPane } from "./editor";
 import { SplitTree, type Axis, type Direction } from "./split";
 import { langFromFilename } from "./languages";
 import {
+  renameFile,
   writeManifest,
   writeScratchContent,
   writeSession,
@@ -71,6 +72,12 @@ function basename(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+/** Directory part of `p` including its trailing separator ("" when none). */
+function dirname(p: string): string {
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i >= 0 ? p.slice(0, i + 1) : "";
+}
+
 function firstLinePreview(text: string): string {
   const line = text.split("\n").find((l) => l.trim()) ?? "";
   return line.trim().slice(0, 80);
@@ -98,8 +105,14 @@ export class TabManager {
   /** A dirty file tab wants to close — the host shows the Save/Don't Save/Cancel
    *  prompt, then calls back into closeTab/saveFocused. */
   onCloseDirty: ((id: number) => void) | null = null;
-  /** Double-clicking a scratch tab's label requests a rename. */
-  onRenameRequest: ((id: number) => void) | null = null;
+  /** Surface a one-line status message (e.g. a failed file rename). */
+  onStatus: ((message: string, kind: "info" | "error") => void) | null = null;
+
+  /** Scratch tab currently being renamed inline (its label is an <input>). */
+  private renamingId: number | null = null;
+  /** Singleton right-click menu for the tab bar (Close Tab / Others / Right). */
+  private tabMenuEl: HTMLElement | null = null;
+  private tabMenuTeardown: (() => void) | null = null;
 
   constructor(
     private readonly tabBar: HTMLElement,
@@ -272,6 +285,52 @@ export class TabManager {
       const next = this.tabs[Math.min(idx, this.tabs.length - 1)];
       this.split.showTab(next.id);
     }
+    this.focused.focus();
+    this.scheduleSessionWrite();
+  }
+
+  /** Close every tab except `keepId`. A dirty (unsaved) real file is left in
+   *  place — silently, no prompt — so a careless click can't lose work. */
+  closeOthers(keepId: number = this.focusedId): void {
+    this.closeMany((t) => t.id !== keepId, keepId);
+  }
+
+  /** Close the tabs sitting to the right of `fromId` in the tab bar, leaving
+   *  dirty real files untouched (same no-prompt, no-loss rule as closeOthers). */
+  closeToRight(fromId: number = this.focusedId): void {
+    const from = this.tabs.findIndex((t) => t.id === fromId);
+    if (from === -1) return;
+    const right = new Set(this.tabs.slice(from + 1).map((t) => t.id));
+    this.closeMany((t) => right.has(t.id), fromId);
+  }
+
+  /** Whether closing this tab would lose unsaved work — the one case batch
+   *  closes skip. A scratch is always autosaved + kept in history, so it's safe. */
+  private isUnsaved(tab: Tab): boolean {
+    return tab.kind === "file" && this.isDirty(tab);
+  }
+
+  /** Destroy the tabs matching `pick` (minus unsaved files), then make sure
+   *  `keepId` is shown and focused. Closes in one pass rather than routing each
+   *  through closeTab, so a background close can't hijack the visible leaf. */
+  private closeMany(pick: (t: Tab) => boolean, keepId: number): void {
+    const doomed = this.tabs.filter((t) => pick(t) && t.id !== keepId && !this.isUnsaved(t));
+    if (doomed.length === 0) return;
+    for (const tab of doomed) {
+      const idx = this.tabs.indexOf(tab);
+      if (idx === -1) continue;
+      this.tabs.splice(idx, 1);
+      if (tab.autosaveTimer) clearTimeout(tab.autosaveTimer);
+      if (tab.kind === "scratch") this.persistScratch(tab);
+      this.split.removeTab(tab.id); // collapses its leaf if it was shown in a split
+      tab.pane.destroy();
+    }
+    // showTab focuses keepId's leaf, but when a collapse already moved focus
+    // there it short-circuits without firing onFocusChange — so pin focusedId
+    // ourselves, else it lingers on a tab we just destroyed.
+    this.split.showTab(keepId);
+    this.focusedId = keepId;
+    this.render();
     this.focused.focus();
     this.scheduleSessionWrite();
   }
@@ -551,15 +610,10 @@ export class TabManager {
     return this.tabs.find((t) => t.id === this.focusedId);
   }
 
-  /** Current custom name of the focused tab (empty when it has none). */
-  get focusedCustomName(): string {
-    return this.focusedTab()?.customName ?? "";
-  }
-
-  /** Auto title of the focused tab — shown as the rename placeholder. */
-  get focusedAutoTitle(): string {
-    const tab = this.focusedTab();
-    return tab ? this.autoTitleFor(tab) : "";
+  /** Whether a tab label is currently being edited inline — the host's global
+   *  key handler backs off so typing reaches the rename field, not commands. */
+  get isRenaming(): boolean {
+    return this.renamingId != null;
   }
 
   /** Display title of the focused tab: filename for a file, name/first-line for
@@ -585,18 +639,190 @@ export class TabManager {
     return this.focusedTab()?.readOnly ?? false;
   }
 
-  /** Set (or, with an empty string, clear) the focused tab's display name. */
-  renameFocused(name: string): void {
-    const tab = this.focusedTab();
+  /** Turn a tab's label into an inline editor, pre-filled with its current name
+   *  (the user can clear it and type a new one). For a scratch this sets the
+   *  display name; for a real file it renames the file on disk. */
+  private beginRename(id: number): void {
+    const tab = this.tabs.find((t) => t.id === id);
     if (!tab) return;
-    const trimmed = name.trim();
-    tab.customName = trimmed || undefined;
+    this.split.showTab(id); // editing names the *shown* tab
+    this.renamingId = id;
+    this.render(); // render() draws the <input> and focuses it
+  }
+
+  /** Commit an inline rename. A scratch just takes the new display name (an empty
+   *  value, or the unchanged auto-title, keeps the label dynamic). A real file is
+   *  renamed on disk in place — that's an async op that can fail, so it owns its
+   *  own re-render path. */
+  private commitRename(id: number, value: string): void {
+    if (this.renamingId !== id) return; // already settled (e.g. Enter then blur)
+    this.renamingId = null;
+    const tab = this.tabs.find((t) => t.id === id);
+    if (!tab) {
+      this.render();
+      this.focused.focus();
+      return;
+    }
+    if (tab.kind === "file") {
+      void this.renameFileTab(tab, value.trim());
+      return;
+    }
+    const trimmed = value.trim();
+    tab.customName = trimmed && trimmed !== this.autoTitleFor(tab) ? trimmed : undefined;
     if (tab.kind === "scratch" && tab.scratchId != null) {
       this.upsertManifest(tab, tab.pane.fullText);
       this.scheduleManifestWrite();
     }
     this.render();
     this.focused.focus();
+  }
+
+  /** Rename a file tab's backing file within its own directory. No-ops on an
+   *  empty / unchanged name; rejects path separators (this is a rename, not a
+   *  move) and reports any FS failure via onStatus, leaving the tab untouched. */
+  private async renameFileTab(tab: Tab, name: string): Promise<void> {
+    const old = tab.path;
+    const restore = () => {
+      this.render();
+      this.focused.focus();
+    };
+    if (!old || !name || name === basename(old)) return restore();
+    if (name.includes("/") || name.includes("\\")) {
+      this.onStatus?.(`Name can't contain a slash`, "error");
+      return restore();
+    }
+    const next = dirname(old) + name;
+    try {
+      await renameFile(old, next);
+    } catch (e) {
+      this.onStatus?.(e instanceof Error ? e.message : String(e), "error");
+      return restore();
+    }
+    tab.path = next;
+    const mode = langFromFilename(name);
+    if (mode !== "auto") tab.pane.setMode(mode);
+    this.render();
+    this.focused.focus();
+    this.onFocusChange?.(); // path/lang changed — refresh the status bar
+    this.scheduleSessionWrite();
+    this.onStatus?.(`Renamed to ${name}`, "info");
+  }
+
+  private cancelRename(): void {
+    if (this.renamingId == null) return;
+    this.renamingId = null;
+    this.render();
+    this.focused.focus();
+  }
+
+  /** The inline rename field: pre-filled with the tab's current title, all
+   *  selected so the user can either type over it or edit it. Enter and
+   *  click-away commit, Escape abandons. Pointer events are kept off the parent
+   *  tab so clicking into the field doesn't switch tabs or start another rename. */
+  private makeRenameInput(tab: Tab): HTMLInputElement {
+    const input = document.createElement("input");
+    input.className = "tab-rename";
+    input.type = "text";
+    input.value = this.titleFor(tab);
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
+    input.addEventListener("dblclick", (e) => e.stopPropagation());
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.commitRename(tab.id, input.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.cancelRename();
+      }
+    });
+    input.addEventListener("blur", () => this.commitRename(tab.id, input.value));
+    // Focus + select once it's in the live tab bar (render appends right after).
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+    return input;
+  }
+
+  // ---- tab right-click menu -----------------------------------------------
+
+  private closeTabMenu(): void {
+    if (this.tabMenuEl) this.tabMenuEl.classList.add("hidden");
+    this.tabMenuTeardown?.();
+    this.tabMenuTeardown = null;
+  }
+
+  /** Custom tab context menu, styled like the editor's (`.ctxmenu`). "Close
+   *  Others" / "Close to the Right" are disabled when every candidate tab is an
+   *  unsaved file (those are skipped), so the menu never silently no-ops. */
+  private openTabMenu(tab: Tab, x: number, y: number): void {
+    this.closeTabMenu();
+    if (!this.tabMenuEl) {
+      const el = document.createElement("div");
+      el.className = "ctxmenu hidden";
+      el.setAttribute("role", "menu");
+      document.body.appendChild(el);
+      this.tabMenuEl = el;
+    }
+    const el = this.tabMenuEl;
+    el.replaceChildren();
+
+    const idx = this.tabs.indexOf(tab);
+    const canOthers = this.tabs.some((t) => t.id !== tab.id && !this.isUnsaved(t));
+    const canRight = this.tabs.slice(idx + 1).some((t) => !this.isUnsaved(t));
+
+    const item = (label: string, enabled: boolean, run: () => void): HTMLElement => {
+      const it = document.createElement("div");
+      it.className = "ctxmenu-item" + (enabled ? "" : " disabled");
+      it.setAttribute("role", "menuitem");
+      const l = document.createElement("span");
+      l.textContent = label;
+      it.appendChild(l);
+      if (enabled) {
+        it.addEventListener("mousedown", (e) => e.preventDefault());
+        it.addEventListener("click", () => {
+          this.closeTabMenu();
+          run();
+        });
+      }
+      return it;
+    };
+    const sep = (): HTMLElement => {
+      const s = document.createElement("div");
+      s.className = "ctxmenu-sep";
+      return s;
+    };
+
+    el.append(
+      item("Close Tab", true, () => this.requestClose(tab.id)),
+      sep(),
+      item("Close Other Tabs", canOthers, () => this.closeOthers(tab.id)),
+      item("Close Tabs to the Right", canRight, () => this.closeToRight(tab.id)),
+    );
+
+    el.classList.remove("hidden");
+    const r = el.getBoundingClientRect();
+    el.style.left = `${Math.round(Math.max(4, Math.min(x, window.innerWidth - r.width - 4)))}px`;
+    el.style.top = `${Math.round(Math.max(4, Math.min(y, window.innerHeight - r.height - 4)))}px`;
+
+    const onDown = (e: MouseEvent) => {
+      if (!el.contains(e.target as Node)) this.closeTabMenu();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") this.closeTabMenu();
+    };
+    // Defer wiring so the originating contextmenu event doesn't self-dismiss it.
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", onDown, true);
+      document.addEventListener("keydown", onKey, true);
+    }, 0);
+    this.tabMenuTeardown = () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }
 
   private untitledName(tab: Tab): string {
@@ -639,6 +865,21 @@ export class TabManager {
       });
       el.appendChild(close);
 
+      // Right-click anywhere on the tab opens our own menu (Close Tab / Close
+      // Others / Close to the Right), replacing the native WKWebView one.
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.openTabMenu(tab, e.clientX, e.clientY);
+      });
+
+      // The label turns into an inline editor for the tab being renamed; the
+      // input is drawn by render() so it survives the re-renders a rename causes.
+      if (this.renamingId === tab.id) {
+        el.appendChild(this.makeRenameInput(tab));
+        this.tabBar.appendChild(el);
+        continue;
+      }
+
       const label = document.createElement("span");
       label.className = "tab-label";
       const title = this.titleFor(tab);
@@ -650,13 +891,12 @@ export class TabManager {
         e.preventDefault();
         this.split.showTab(tab.id);
       });
-      // Double-click a scratch label to rename it; file tabs are named by path.
-      if (tab.kind === "scratch") {
-        el.addEventListener("dblclick", (e) => {
-          e.preventDefault();
-          this.onRenameRequest?.(tab.id);
-        });
-      }
+      // Double-click the label to rename inline: a scratch's display name, or a
+      // file's name on disk.
+      el.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        this.beginRename(tab.id);
+      });
       this.tabBar.appendChild(el);
     }
 

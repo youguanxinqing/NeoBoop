@@ -31,8 +31,6 @@ const langSelect = document.getElementById("lang-select") as HTMLSelectElement;
 const pickerWrap = document.getElementById("picker-wrap")!;
 const pickerInput = document.getElementById("picker-input") as HTMLInputElement;
 const pickerList = document.getElementById("picker-list")!;
-const renameWrap = document.getElementById("rename-wrap")!;
-const renameInput = document.getElementById("rename-input") as HTMLInputElement;
 const confirmWrap = document.getElementById("confirm-wrap")!;
 const confirmMsg = document.getElementById("confirm-msg")!;
 const confirmButtons = document.getElementById("confirm-buttons")!;
@@ -90,6 +88,7 @@ langSelect.addEventListener("change", () => {
   tabs.focused.focus();
 });
 tabs.onFocusChange = syncStatus;
+tabs.onStatus = (msg, kind) => setStatus(msg, kind);
 syncStatus();
 
 // ---- script registry (built-in + user) -----------------------------------
@@ -238,11 +237,8 @@ tabs.onCloseDirty = async (id) => {
   tabs.closeTab(id);
 };
 
-// Double-click a scratch tab to rename it (⌘S is now Save, not rename).
-tabs.onRenameRequest = (id) => {
-  tabs.showTab(id);
-  openRename();
-};
+// Double-clicking a scratch tab renames it inline (handled in TabManager); ⌘S is
+// Save, not rename.
 
 // ---- run a script ---------------------------------------------------------
 
@@ -493,37 +489,6 @@ pickerInput.addEventListener("keydown", (e) => {
     closePicker();
   }
 });
-
-// ---- rename scratch tab (double-click) -------------------------------------
-// ⌘S is now Save. A scratch's name is set by double-clicking its tab; for a
-// scratch the name persists into the history manifest, for a real file the
-// name is its filename (these tabs aren't renamable here).
-
-function openRename(): void {
-  renameInput.value = tabs.focusedCustomName;
-  renameInput.placeholder = tabs.focusedAutoTitle || "Tab name";
-  renameWrap.classList.remove("hidden");
-  renameInput.focus();
-  renameInput.select();
-}
-
-function closeRename(): void {
-  renameWrap.classList.add("hidden");
-  tabs.focused.focus();
-}
-
-renameInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    tabs.renameFocused(renameInput.value);
-    closeRename();
-  } else if (e.key === "Escape") {
-    e.preventDefault();
-    closeRename();
-  }
-});
-// Clicking away abandons the rename (no commit), like dismissing the picker.
-renameInput.addEventListener("blur", () => renameWrap.classList.add("hidden"));
 
 // ---- unsaved-changes prompt ------------------------------------------------
 // A small in-app modal for the Save / Don't Save / Cancel decision when closing
@@ -869,7 +834,7 @@ window.addEventListener(
   (e) => {
     // Overlays own the keyboard while open.
     if (!pickerWrap.classList.contains("hidden")) return;
-    if (!renameWrap.classList.contains("hidden")) return;
+    if (tabs.isRenaming) return; // an inline tab rename owns the keyboard
     if (!confirmWrap.classList.contains("hidden")) return;
     if (!gsearchWrap.classList.contains("hidden")) return;
 

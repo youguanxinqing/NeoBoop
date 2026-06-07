@@ -658,6 +658,22 @@ body.split-dragging-column * {
   white-space: nowrap;
 }
 
+/* Inline rename: the label becomes a centered field in place, ringed in accent
+   so it reads as "editing this tab" rather than a separate popup. */
+.tab-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: center;
+  padding: 1px 4px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .tab-close {
   position: absolute;
   left: 5px;
@@ -757,33 +773,6 @@ body.split-dragging-column * {
   font-size: 15px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-}
-
-/* ---- rename tab (⌘S) — a compact single-field cousin of the picker ---- */
-.rename-wrap {
-  position: absolute;
-  top: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(360px, 80vw);
-  background: var(--picker-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  z-index: 10;
-  overflow: hidden;
-}
-.rename-wrap.hidden {
-  display: none;
-}
-.rename-input {
-  width: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--fg);
-  font-size: 15px;
-  padding: 12px 14px;
 }
 
 /* ---- unsaved-changes prompt (close a dirty file) ---- */

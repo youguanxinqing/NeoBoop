@@ -209,6 +209,15 @@ fn summon_new_boop<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit("new-boop", ());
 }
 
+/// Relaunch the whole app: exit this process and start a fresh one. Exposed as
+/// the "Restart Application" palette action — handy after a script-folder change
+/// or when the editor gets into a wedged state. `restart()` diverges (never
+/// returns), so the frontend's `invoke` promise simply never resolves.
+#[tauri::command]
+fn restart_app<R: Runtime>(app: AppHandle<R>) {
+    app.restart();
+}
+
 /// (Re)binds the global quick-capture shortcut to `accelerator` (Tauri syntax,
 /// e.g. "Control+Alt+Space"). Called from the frontend on launch with the saved
 /// value, and again whenever the user records a new chord in Preferences. Any
@@ -340,6 +349,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             read_scripts,
+            restart_app,
             set_global_shortcut,
             take_opened_files,
             read_text_file,

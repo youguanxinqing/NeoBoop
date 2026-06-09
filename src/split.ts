@@ -183,6 +183,22 @@ export class SplitTree {
     return this.removeLeaf(this.focused);
   }
 
+  /** Collapse the whole layout down to the focused leaf — Emacs
+   *  `delete-other-windows` (⌃X 1). The other leaves' tabs survive, parked in
+   *  the holder and still listed in the tab bar; only the splits disappear.
+   *  No-op when there's nothing to collapse. Returns true if anything closed. */
+  closeOthers(): boolean {
+    if (this.root === this.focused) return false; // already the lone leaf.
+    // The iron rule: don't rebuild the pane, just promote it to root. Its DOM
+    // (and live EditorView) rides along when render() re-parents it.
+    this.focused.parent = null;
+    this.root = this.focused;
+    this.render();
+    this.onLayoutChange?.();
+    this.onFocusChange?.(this.focused.tabId);
+    return true;
+  }
+
   /** Drop any leaf showing `tabId` — used when the tab itself is destroyed.
    *  Returns true if a leaf was actually collapsed (false for the lone root). */
   removeTab(tabId: number): boolean {

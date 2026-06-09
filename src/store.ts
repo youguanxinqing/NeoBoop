@@ -100,6 +100,9 @@ export const writeSession = (entries: SessionEntry[]): Promise<void> => writeJso
 
 // ---- `boop` CLI shim ("Install command in PATH") --------------------------
 
+/** Relaunch the whole app. The promise never resolves — the process is replaced. */
+export const restartApp = (): Promise<never> => invoke("restart_app");
+
 export const cliStatus = (): Promise<boolean> => invoke("cli_status");
 export const installCli = (): Promise<string> => invoke("install_cli");
 export const uninstallCli = (): Promise<string> => invoke("uninstall_cli");

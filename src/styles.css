@@ -324,7 +324,7 @@ body,
 }
 
 /* ---- global cross-tab search (⌃X ⌃F) ----
-   A ⌘B-style overlay that searches every open tab's name + content. Each row is
+   A ⌥X-style overlay that searches every open tab's name + content. Each row is
    a tab with hits: name (matched chars marked) + kind badge + count, then a
    content snippet with the query highlighted. See mockups/global-search.html. */
 .gsearch-wrap {

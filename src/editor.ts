@@ -18,6 +18,7 @@ import {
   toggleHighlight as toggleTermHighlight,
 } from "./highlight";
 import { editorContextMenu } from "./context-menu";
+import { paneChords } from "./pane-keymap";
 
 /** Above this document size (characters), syntax highlighting is disabled and
  *  the buffer renders as plain text — keeps large files snappy. */
@@ -97,6 +98,9 @@ export class EditorPane {
         this.onDocChange?.();
       }),
       keymap.of(extraKeymap),
+      // Emacs-style pane chords (⌃X prefix, ⌃V/⌥V half-page) — must be owned by
+      // CodeMirror so the keys never leak into the buffer; see pane-keymap.ts.
+      paneChords,
       editorTheme,
       // Multi-colour "interesting words" highlighting (vim-interestingwords).
       interestingWords(),

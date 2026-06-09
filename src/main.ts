@@ -3,6 +3,7 @@ import { getAllWebviewWindows, WebviewWindow } from "@tauri-apps/api/webviewWind
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { TabManager } from "./tabs";
+import { paneCommands } from "./pane-keymap";
 import type { Direction } from "./split";
 import { search } from "./picker";
 import { scripts as builtinScripts, libs } from "./scripts/registry";
@@ -16,6 +17,7 @@ import {
   readScratchContent,
   readSession,
   readTextFile,
+  restartApp,
   takeOpenedFiles,
   uninstallCli,
   type ScratchMeta,
@@ -122,7 +124,7 @@ function setStatus(message: string, kind: "info" | "error" | "idle"): void {
 // ---- preferences window ---------------------------------------------------
 
 // Opened from the native "Settings…" menu item (⌘,) — Rust emits "open-settings"
-// — and from the ⌘B palette. A dedicated window, the way macOS apps (and Boop)
+// — and from the ⌥X palette. A dedicated window, the way macOS apps (and Boop)
 // present Settings. It writes the chosen folder to localStorage (shared across
 // same-origin windows) and emits "scripts-folder-changed"; we reload here.
 async function openPreferences(): Promise<void> {
@@ -263,7 +265,7 @@ function execute(script: BoopScript): void {
 // ---- command palette (scripts + actions) ----------------------------------
 
 // A palette entry is an app action, a boop script, or a tab in the switcher.
-// Surfacing actions in the ⌘B palette — the way Boop already exposes everything
+// Surfacing actions in the ⌥X palette — the way Boop already exposes everything
 // — is how features like the scripts folder and pane switching stay
 // discoverable instead of hiding behind bare shortcuts.
 interface PickerEntry {
@@ -345,6 +347,13 @@ function commandSession(): PickerSession {
           choose: () => void openPreferences(),
         },
         {
+          name: "Restart Application",
+          description: "Quit and relaunch NeoBoop",
+          badge: "action",
+          keywords: "restart relaunch reload reboot quit reopen refresh app application",
+          choose: () => void restartApp(),
+        },
+        {
           name: "Install 'boop' Command in PATH",
           description: "Add a `boop` terminal command that opens files in NeoBoop",
           badge: "action",
@@ -371,7 +380,7 @@ function commandSession(): PickerSession {
   };
 }
 
-/** Tab-switcher session (⌘B → "Select Pane"): pick a tab to show in the focused
+/** Tab-switcher session (⌥X → "Select Pane"): pick a tab to show in the focused
  *  pane. Searchable by title or content; Enter shows it in the current pane. */
 function tabSession(): PickerSession {
   return {
@@ -387,7 +396,7 @@ function tabSession(): PickerSession {
   };
 }
 
-/** Scratch-history session (⌘B → "Scratch History…"): every scratch ever typed
+/** Scratch-history session (⌥X → "Scratch History…"): every scratch ever typed
  *  is kept forever in the manifest; pick one to reopen it in a tab. Searchable
  *  by name or first-line preview, ordered newest-first by the manager. */
 function scratchHistorySession(): PickerSession {
@@ -542,7 +551,7 @@ confirmWrap.addEventListener("keydown", (e) => {
 });
 
 // ---- global cross-tab search (⌃X ⌃F) --------------------------------------
-// A ⌘B-style overlay that searches every open tab's name + content at once
+// A ⌥X-style overlay that searches every open tab's name + content at once
 // (triggered by the Emacs-style ⌃X prefix → ⌃F; see the capture-phase handler).
 // Each result is a tab with hits — name (matched chars marked) + kind badge +
 // count, then a content snippet with the query highlighted. Selecting jumps to
@@ -689,21 +698,8 @@ window.addEventListener("keydown", (e) => {
   if (!e.metaKey || e.ctrlKey) return;
   const key = e.key.toLowerCase();
 
-  // Cmd-B: toggle the boop command palette.
-  if (key === "b" && !e.shiftKey) {
-    e.preventDefault();
-    if (pickerWrap.classList.contains("hidden")) openPicker(commandSession());
-    else closePicker();
-    return;
-  }
-  // Cmd-P: jump straight into Select Pane (the tab switcher), skipping the
-  // command palette. Same overlay, just opened in the tab session directly.
-  if (key === "p" && !e.shiftKey) {
-    e.preventDefault();
-    if (pickerWrap.classList.contains("hidden")) openPicker(tabSession());
-    else closePicker();
-    return;
-  }
+  // (M-x command palette and M-p Select Pane are Meta/Option chords — handled
+  // in the dedicated listener below, not here.)
   // Cmd-S: save. Real files write in place; a scratch pops Save As (promote).
   if (key === "s" && !e.shiftKey) {
     e.preventDefault();
@@ -772,6 +768,32 @@ window.addEventListener("keydown", (e) => {
   // capture-phase listener below, not here (this handler only sees ⌘).
 });
 
+// ---- Emacs-style Meta shortcuts (Option = Meta on macOS) ------------------
+// ⌥X opens the command palette, ⌥P opens Select Pane — the M-x / M-p analogues.
+// Option composes accented characters (⌥X → ≈, ⌥P → π), so e.key isn't "x"/"p"
+// here; we match the physical key via e.code instead. Opening a picker moves
+// focus into its search field, so the composed char lands there (transient) and
+// never reaches the document.
+window.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+
+  // M-x: toggle the boop command palette.
+  if (e.code === "KeyX") {
+    e.preventDefault();
+    if (pickerWrap.classList.contains("hidden")) openPicker(commandSession());
+    else closePicker();
+    return;
+  }
+  // M-p: jump straight into Select Pane (the tab switcher), skipping the
+  // command palette. Same overlay, just opened in the tab session directly.
+  if (e.code === "KeyP") {
+    e.preventDefault();
+    if (pickerWrap.classList.contains("hidden")) openPicker(tabSession());
+    else closePicker();
+    return;
+  }
+});
+
 // Pane control via Ctrl chords, handled in the CAPTURE phase so they beat
 // CodeMirror's mac emacs bindings before the editor sees them — e.g. ⌃W is
 // emacs kill-region, so without intercepting it the editor would also cut.
@@ -791,25 +813,14 @@ const PANE_DIRS: Record<string, Direction> = {
   l: "right",
 };
 
-// ⌃X prefix: after ⌃X we wait briefly for the second key (⌃F or 0). ⌃X itself
-// no longer closes the pane — that moved to ⌃X 0 (Emacs delete-window) so ⌃X
-// can serve as a prefix without the close-pane action lagging behind a timeout.
-let ctrlXPending = false;
-let ctrlXTimer: number | undefined;
-function endCtrlXPrefix(): void {
-  ctrlXPending = false;
-  if (ctrlXTimer) clearTimeout(ctrlXTimer);
-  ctrlXTimer = undefined;
-}
-function beginCtrlXPrefix(): void {
-  ctrlXPending = true;
-  setStatus("⌃X-   ⌃F search all tabs · 0 close pane", "info");
-  if (ctrlXTimer) clearTimeout(ctrlXTimer);
-  ctrlXTimer = window.setTimeout(() => {
-    endCtrlXPrefix();
-    setStatus("", "idle");
-  }, 1800);
-}
+// The ⌃X prefix (⌃F / 0 / 1 / [ / ]) and the ⌃V / ⌥V half-page scrolls live in
+// CodeMirror's own keymap (see pane-keymap.ts) — a global preventDefault can't
+// stop WKWebView inserting a chord's printable key, but a binding inside the
+// editor's input pipeline can. We just wire the app-level actions it calls.
+paneCommands.openGlobalSearch = openGlobalSearch;
+paneCommands.closePane = () => tabs.closePane();
+paneCommands.closeOtherPanes = () => tabs.closeOtherPanes();
+paneCommands.setStatus = setStatus;
 
 // ⌃W prefix (Vim window commands): after ⌃W we wait briefly for s / v to split.
 let ctrlWPending = false;
@@ -840,31 +851,6 @@ window.addEventListener(
 
     const key = e.key.toLowerCase();
 
-    // ⌃X prefix continuation.
-    if (ctrlXPending) {
-      // Keep waiting through the bare modifier keydowns themselves.
-      if (key === "control" || key === "shift" || key === "alt" || key === "meta") return;
-      if (e.ctrlKey && key === "f" && !e.metaKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        endCtrlXPrefix();
-        setStatus("", "idle");
-        openGlobalSearch();
-        return;
-      }
-      if (key === "0" && !e.metaKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        endCtrlXPrefix();
-        setStatus("", "idle");
-        tabs.closePane();
-        return;
-      }
-      // Any other key abandons the prefix and is handled normally below.
-      endCtrlXPrefix();
-      setStatus("", "idle");
-    }
-
     // ⌃W prefix continuation (ctrl may be held or released for the second key).
     if (ctrlWPending) {
       if (key === "control" || key === "shift" || key === "alt" || key === "meta") return;
@@ -894,12 +880,6 @@ window.addEventListener(
 
     if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
 
-    if (key === "x") {
-      e.preventDefault();
-      e.stopPropagation();
-      beginCtrlXPrefix();
-      return;
-    }
     if (key === "w") {
       e.preventDefault();
       e.stopPropagation();
@@ -973,7 +953,7 @@ void (async () => {
   const extra = allScripts.length - builtinScripts.length;
   const suffix = extra > 0 ? ` (+${extra} custom)` : "";
   setStatus(
-    `${allScripts.length} boops loaded${suffix} — ⌘B run · ⌘S save · ⌘T tab · ⌃W s/v split`,
+    `${allScripts.length} boops loaded${suffix} — ⌥X run · ⌘S save · ⌘T tab · ⌃W s/v split`,
     "info",
   );
   // Pick up any file the app was cold-launched with (Finder "Open With…").

@@ -492,6 +492,13 @@ export class TabManager {
     if (this.split.closeFocused()) this.focused.focus();
   }
 
+  /** Keep the focused pane and close every other pane — Emacs `delete-other-
+   *  windows` (⌃X 1). The other tabs survive in the holder / tab bar. No-op
+   *  when not split. */
+  closeOtherPanes(): void {
+    if (this.split.closeOthers()) this.focused.focus();
+  }
+
   /** Move focus to the neighbouring pane in `dir`. Returns whether it moved
    *  (false when there's no pane that way — caller can let the key fall
    *  through to the editor). */
@@ -506,7 +513,7 @@ export class TabManager {
     this.split.resizeFocused(grow);
   }
 
-  // ---- tab switcher (⌘B → Select Pane) ------------------------------------
+  // ---- tab switcher (⌥X → Select Pane) ------------------------------------
 
   /** Snapshot of all tabs for the switcher picker. */
   list(): { id: number; title: string; preview: string; focused: boolean; shown: boolean }[] {

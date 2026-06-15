@@ -581,8 +581,17 @@ export class TabManager {
       if (tab.pane.dom.parentElement !== this.holder) this.holder.appendChild(tab.pane.dom);
       tab.pane.setVisible(false);
     }
-    // Slots changed size — re-measure the visible editors so scroll math is sane.
-    for (const id of shown) this.paneFor(id)?.view.requestMeasure();
+    // Slots changed size — re-measure the visible editors so CodeMirror refits to
+    // its new pane. In WKWebView the flex reflow from adding/removing a pane lands
+    // a frame late, so the first measure can still read the OLD box: the editor
+    // then stays wrapped at the smaller width with dead space around it (the
+    // "space won't get used after closing a pane" bug). Measuring again next frame
+    // catches the committed size.
+    const remeasure = (): void => {
+      for (const id of shown) this.paneFor(id)?.view.requestMeasure();
+    };
+    remeasure();
+    requestAnimationFrame(remeasure);
     this.render();
   }
 
@@ -832,6 +841,84 @@ export class TabManager {
     };
   }
 
+  // ---- drag-to-reorder ----------------------------------------------------
+
+  /** Arm a pointer-drag to reorder the tab a `mousedown` landed on (Chrome /
+   *  Safari / VS Code model). Nothing visible happens until the pointer moves
+   *  past a small threshold; below it this is a no-op and the click that already
+   *  selected the tab stands. Once dragging, the grabbed tab tracks the pointer
+   *  1:1 while its neighbours glide to make room; on release we splice it into
+   *  its new slot, re-render, and persist the order. We deliberately don't
+   *  re-render mid-drag — render() rebuilds the tab DOM, which would yank the
+   *  element out from under the pointer; all motion is inline transforms instead. */
+  private beginTabDrag(id: number, startX: number): void {
+    let dragging = false;
+    let els: HTMLElement[] = [];
+    let centers: number[] = []; // original x-centre of each tab, fixed for the drag
+    let from = -1; // grabbed tab's index (same in `els` and `this.tabs`)
+    let to = -1; // live target index as the pointer moves
+    let width = 0; // grabbed tab's width — how far neighbours shift to make room
+    let dragged: HTMLElement | null = null;
+
+    const begin = (): boolean => {
+      els = [...this.tabBar.querySelectorAll<HTMLElement>(".tab")];
+      from = els.findIndex((el) => el.dataset.tabId === String(id));
+      if (from < 0) return false;
+      dragged = els[from];
+      const rects = els.map((el) => el.getBoundingClientRect());
+      centers = rects.map((r) => r.left + r.width / 2);
+      width = rects[from].width;
+      to = from;
+      dragging = true;
+      this.tabBar.classList.add("reordering");
+      dragged.classList.add("dragging");
+      return true;
+    };
+
+    const onMove = (e: MouseEvent): void => {
+      const dx = e.clientX - startX;
+      if (!dragging) {
+        if (Math.abs(dx) < 4) return;
+        if (!begin()) return cleanup();
+      }
+      dragged!.style.transform = `translateX(${dx}px)`;
+      // Target slot = how many neighbours the grabbed tab's centre has crossed.
+      // Only one of the two loops runs (it moved either left or right).
+      const c = centers[from] + dx;
+      let t = from;
+      while (t < els.length - 1 && c > centers[t + 1]) t++;
+      while (t > 0 && c < centers[t - 1]) t--;
+      if (t === to) return;
+      to = t;
+      els.forEach((el, i) => {
+        if (i === from) return;
+        const shift = from < i && i <= to ? -width : to <= i && i < from ? width : 0;
+        el.style.transform = shift ? `translateX(${shift}px)` : "";
+      });
+    };
+
+    const onUp = (): void => {
+      cleanup();
+      if (!dragging) return; // never crossed the threshold — it was a plain click
+      if (to !== from && to >= 0) {
+        const [moved] = this.tabs.splice(from, 1);
+        this.tabs.splice(to, 0, moved);
+        this.scheduleSessionWrite();
+      }
+      this.render(); // rebuilds the bar, clearing every inline transform
+      this.focused.focus();
+    };
+
+    const cleanup = (): void => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      this.tabBar.classList.remove("reordering");
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   private untitledName(tab: Tab): string {
     const idx = this.tabs.indexOf(tab);
     return `Untitled ${(idx >= 0 ? idx : this.tabs.length) + 1}`;
@@ -858,8 +945,8 @@ export class TabManager {
         (shown.has(tab.id) ? " shown" : "") +
         (dirty ? " dirty" : "");
 
-      // Close button sits absolutely on the left and appears on hover/active,
-      // so the centered label never shifts (the macOS Finder/Safari pattern).
+      // Close button sits absolutely on the right and appears on hover/active,
+      // so the centered label never shifts (the Chrome / VS Code pattern).
       // For a dirty file it shows a filled dot at rest, ✕ on hover.
       const close = document.createElement("button");
       close.className = "tab-close";
@@ -894,9 +981,15 @@ export class TabManager {
       label.title = tab.kind === "file" && tab.path ? tab.path : title;
       el.appendChild(label);
 
+      el.dataset.tabId = String(tab.id);
       el.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
         e.preventDefault();
+        // Select immediately (the dragged tab is the active one), then arm a
+        // drag — it only kicks in once the pointer moves past the threshold, so
+        // a plain click still just selects.
         this.split.showTab(tab.id);
+        this.beginTabDrag(tab.id, e.clientX);
       });
       // Double-click the label to rename inline: a scratch's display name, or a
       // file's name on disk.

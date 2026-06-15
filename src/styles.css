@@ -178,6 +178,15 @@ body,
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
   /* Driven by ⌘+ / ⌘- zoom (see main.ts); falls back to Boop's 15px default. */
   font-size: var(--editor-font-size, 15px);
+  /* WKWebView repaint fix: WebKit drives inertial scroll on the compositor and
+     sometimes fails to repaint the scrolled-in region — content AND gutter go
+     blank until the next scroll nudge forces a repaint. Promoting the scroller
+     to its own stable GPU layer gives WebKit a proper scrolling layer with
+     in-sync backing store, so newly-revealed lines paint as they arrive. Same
+     family as the white-flash bug; translateZ(0) is the canonical remedy. */
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 /* "Interesting words" highlight marks (see highlight.ts). The background wash is
@@ -658,6 +667,24 @@ body.split-dragging-column * {
   white-space: nowrap;
 }
 
+/* Drag-to-reorder: while a tab is being dragged the bar gets .reordering — its
+   neighbours glide to make room (transition), the grabbed tab tracks the pointer
+   1:1 (no transition) and lifts above the row. The macOS/Safari tab feel. The
+   inset dividers are hushed for the duration so nothing flickers as tabs slide. */
+.tab-bar.reordering .tab {
+  transition: transform 0.15s ease;
+}
+.tab-bar.reordering .tab::after {
+  opacity: 0;
+}
+.tab-bar.reordering .tab.dragging {
+  transition: none;
+  z-index: 5;
+  cursor: grabbing;
+  background: var(--tab-active-bg);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.28);
+}
+
 /* Inline rename: the label becomes a centered field in place, ringed in accent
    so it reads as "editing this tab" rather than a separate popup. */
 .tab-rename {
@@ -676,7 +703,7 @@ body.split-dragging-column * {
 
 .tab-close {
   position: absolute;
-  left: 5px;
+  right: 5px;
   top: 50%;
   transform: translateY(-50%);
   width: 16px;
